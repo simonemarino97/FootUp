@@ -18,6 +18,19 @@ export default function RootLayout({ children }) {
     <html lang="en" className="dark" style={{ colorScheme: 'dark' }}>
       <head>
         <script dangerouslySetInnerHTML={{__html:'window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);'}} />
+        <script dangerouslySetInnerHTML={{__html:`
+(function(){
+  function strip(){
+    try{
+      var sels=["#made-with-emergent","#emergent-badge","[data-emergent-badge]","a[href*=\\"emergent.sh\\"]","a[href*=\\"emergent.ai\\"]","a[href*=\\"emergent.com\\"]"];
+      sels.forEach(function(s){document.querySelectorAll(s).forEach(function(el){try{el.remove()}catch(e){}})});
+    }catch(e){}
+  }
+  if(document.readyState!=='loading')strip(); else document.addEventListener('DOMContentLoaded',strip);
+  var mo=new MutationObserver(strip);
+  if(document.body)mo.observe(document.body,{childList:true,subtree:true});
+  else document.addEventListener('DOMContentLoaded',function(){mo.observe(document.body,{childList:true,subtree:true})});
+})();`}} />
       </head>
       <body className="bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500/30">
         <Providers>{children}</Providers>

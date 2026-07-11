@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Hide Emergent platform badge / made-with attribution */
+#made-with-emergent,
+#emergent-badge,
+[id^="emergent-"][id$="-badge"],
+[class*="made-with-emergent"],
+[data-emergent-badge],
+a[href*="emergent.sh"][target="_blank"],
+a[href*="emergent.ai"][target="_blank"],
+nextjs-portal,
+#__next-build-watcher {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
 body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",

@@ -59,9 +59,10 @@ const divisionOf = (rating) => {
 export default function App() {
   const [user, setUser] = useState(null)
   const [team, setTeam] = useState(null)
-  const [view, setView] = useState('feed') // feed | myteam | challenges | leaderboard | matches | pricing | admin | referrals
+  const [view, setView] = useState('feed')
   const [authOpen, setAuthOpen] = useState(false)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [legalPage, setLegalPage] = useState(null)
   const [loading, setLoading] = useState(true)
   const [selectedTeamId, setSelectedTeamId] = useState(null)
 
@@ -76,8 +77,9 @@ export default function App() {
   if (loading) return <SplashLoading />
   if (!user) return (
     <>
-      <Landing onGetStarted={() => setAuthOpen(true)} />
+      <Landing onGetStarted={() => setAuthOpen(true)} onLegal={setLegalPage} />
       <AuthDialog open={authOpen} onOpenChange={setAuthOpen} onSuccess={() => { setAuthOpen(false); refresh() }} />
+      <LegalDialog page={legalPage} onClose={() => setLegalPage(null)} />
       <Toaster theme="dark" position="top-center" richColors />
     </>
   )
@@ -110,8 +112,10 @@ export default function App() {
         ) : null}
       </main>
 
+      <Footer onLegal={setLegalPage} />
       <BottomNav view={view} setView={(v) => { setSelectedTeamId(null); setView(v) }} isPro={isPro} isAdmin={user.is_admin} />
       <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} onSuccess={() => { setUpgradeOpen(false); refresh() }} />
+      <LegalDialog page={legalPage} onClose={() => setLegalPage(null)} />
       <Toaster theme="dark" position="top-center" richColors />
     </div>
   )
@@ -130,7 +134,7 @@ const SplashLoading = () => (
 )
 
 // -------- Landing --------
-const Landing = ({ onGetStarted }) => (
+const Landing = ({ onGetStarted, onLegal }) => (
   <div className="min-h-screen overflow-hidden bg-black text-white">
     <div className="relative">
       <div className="absolute inset-0 -z-0">
@@ -153,7 +157,7 @@ const Landing = ({ onGetStarted }) => (
       <div className="relative z-10 mx-auto max-w-5xl px-6 pt-16 pb-32 md:pt-28">
         <motion.div initial={{y:20,opacity:0}} animate={{y:0,opacity:1}} transition={{duration:.7}}>
           <Badge className="mb-6 rounded-full bg-emerald-500/15 px-4 py-1.5 text-emerald-300 border border-emerald-500/30 backdrop-blur">
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" /> The social network for amateur football
+            <Sparkles className="mr-1.5 h-3.5 w-3.5" /> A FOOTUP ASD project · The social network for amateur football
           </Badge>
           <h1 className="text-5xl font-black leading-[1.05] tracking-tight md:text-7xl">
             Your team.<br />Your ranking.<br />
@@ -221,6 +225,7 @@ const Landing = ({ onGetStarted }) => (
         </Button>
       </Card>
     </div>
+    <Footer onLegal={onLegal} landing />
   </div>
 )
 
@@ -312,7 +317,7 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
         <div className="flex items-center gap-2">
           {!isPro && (
             <Button onClick={onUpgrade} size="sm" className="hidden rounded-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/20 hover:opacity-90 md:inline-flex">
-              <Gem className="mr-1.5 h-3.5 w-3.5" /> Upgrade to PRO
+              <Gem className="mr-1.5 h-3.5 w-3.5" /> Get Season Pass
             </Button>
           )}
           {isPro && <ProBadge small />}
@@ -1166,10 +1171,11 @@ const PricingView = ({ user, onUpgrade, onRefresh }) => {
     <div className="space-y-8">
       <div className="text-center">
         <Badge className="mb-3 rounded-full bg-amber-500/15 px-4 py-1.5 text-amber-300 border border-amber-500/30 backdrop-blur">
-          <Gem className="mr-1.5 h-3.5 w-3.5" /> FOOTUP PRO
+          <Gem className="mr-1.5 h-3.5 w-3.5" /> FOOTUP PRO · Team Season Pass
         </Badge>
-        <h1 className="text-4xl font-black md:text-5xl">Unlock your team's <span className="bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">full potential</span></h1>
-        <p className="mx-auto mt-3 max-w-xl text-slate-400">Start free forever. Upgrade whenever you're ready to dominate with advanced tools.</p>
+        <h1 className="text-4xl font-black md:text-5xl">Elevate your team's <span className="bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">season</span></h1>
+        <p className="mx-auto mt-3 max-w-xl text-slate-400">FOOTUP is free forever. The Team Season Pass is an optional yearly membership from FOOTUP ASD that unlocks premium tools for teams who want more from their season.</p>
+        <div className="mx-auto mt-3 max-w-xl text-xs text-slate-500">The Team Season Pass is a digital service offered by FOOTUP ASD to enhance amateur football participation. It is not a commercial SaaS product.</div>
       </div>
 
       <div className="grid gap-5 md:grid-cols-2">
@@ -1179,13 +1185,13 @@ const PricingView = ({ user, onUpgrade, onRefresh }) => {
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <div className="text-sm font-bold text-slate-400">FOOTUP</div>
-                <div className="text-3xl font-black">Free</div>
+                <div className="text-3xl font-black">Free Membership</div>
               </div>
               {!isPro && <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Current plan</Badge>}
             </div>
             <div className="mb-5">
-              <div className="text-4xl font-black">€0<span className="text-lg font-normal text-slate-400">/year</span></div>
-              <div className="text-xs text-slate-500">Forever. No credit card required.</div>
+              <div className="text-4xl font-black">€0<span className="text-lg font-normal text-slate-400">/season</span></div>
+              <div className="text-xs text-slate-500">Open to every amateur team, forever.</div>
             </div>
             <ul className="space-y-2.5">
               {FREE_FEATURES.map(f => (
@@ -1204,14 +1210,14 @@ const PricingView = ({ user, onUpgrade, onRefresh }) => {
             <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-amber-500/20 blur-3xl" />
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <div className="flex items-center gap-2 text-sm font-bold text-amber-300"><Gem className="h-4 w-4" /> FOOTUP</div>
-                <div className="text-3xl font-black bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">PRO</div>
+                <div className="flex items-center gap-2 text-sm font-bold text-amber-300"><Gem className="h-4 w-4" /> FOOTUP PRO</div>
+                <div className="text-3xl font-black bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">Team Season Pass</div>
               </div>
-              {isPro ? <Badge className="bg-amber-500/25 text-amber-200 border border-amber-500/40">Active</Badge> : <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Best value</Badge>}
+              {isPro ? <Badge className="bg-amber-500/25 text-amber-200 border border-amber-500/40">Active</Badge> : <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Recommended</Badge>}
             </div>
             <div className="mb-5">
-              <div className="text-4xl font-black">€9.99<span className="text-lg font-normal text-slate-300">/year</span></div>
-              <div className="text-xs text-amber-200/80">Less than €1 per month</div>
+              <div className="text-4xl font-black">€9.99<span className="text-lg font-normal text-slate-300">/season</span></div>
+              <div className="text-xs text-amber-200/80">Per team · Runs for one full football season</div>
             </div>
             <ul className="space-y-2.5">
               {PRO_FEATURES.map(f => (
@@ -1223,28 +1229,34 @@ const PricingView = ({ user, onUpgrade, onRefresh }) => {
             {isPro ? (
               <div className="mt-6 space-y-2">
                 <div className="rounded-xl bg-black/30 p-3 text-center text-sm">
-                  <div className="text-xs text-slate-400">Renews</div>
+                  <div className="text-xs text-slate-400">Season Pass renews</div>
                   <div className="font-bold text-white">{renew}</div>
                 </div>
-                <Button onClick={cancel} variant="outline" className="w-full rounded-xl border-white/20 bg-white/5 text-white hover:bg-white/10">Cancel subscription</Button>
+                <Button onClick={cancel} variant="outline" className="w-full rounded-xl border-white/20 bg-white/5 text-white hover:bg-white/10">Stop automatic renewal</Button>
               </div>
             ) : (
               <Button onClick={onUpgrade} className="mt-6 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/30 hover:opacity-90">
-                <Rocket className="mr-2 h-4 w-4" /> Upgrade to PRO
+                <Rocket className="mr-2 h-4 w-4" /> Activate Team Season Pass
               </Button>
             )}
+            <div className="mt-3 text-center text-[10px] text-amber-200/70">Offered by FOOTUP ASD · Amateur Sports Association</div>
           </Card>
         </motion.div>
       </div>
 
       <Card className="rounded-3xl border-white/10 bg-white/[.03] p-6 backdrop-blur">
-        <div className="mb-4 flex items-center gap-2"><Gift className="h-5 w-5 text-fuchsia-400" /><h2 className="text-xl font-black">Earn PRO for free</h2></div>
-        <p className="text-sm text-slate-400">Invite other teams. Get free PRO months.</p>
+        <div className="mb-4 flex items-center gap-2"><Gift className="h-5 w-5 text-fuchsia-400" /><h2 className="text-xl font-black">Earn Season Pass access for free</h2></div>
+        <p className="text-sm text-slate-400">Invite other teams to join the FOOTUP community. Grow the network, earn free Season Pass months.</p>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="text-2xl font-black">5 invites</div><div className="text-sm text-emerald-300">30 days PRO free</div></div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="text-2xl font-black">20 invites</div><div className="text-sm text-amber-300">90 days PRO free</div></div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="text-2xl font-black">5 invites</div><div className="text-sm text-emerald-300">+30 days Season Pass</div></div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="text-2xl font-black">20 invites</div><div className="text-sm text-amber-300">+90 days Season Pass</div></div>
         </div>
       </Card>
+
+      <div className="rounded-2xl border border-white/10 bg-white/[.02] p-5 text-xs leading-relaxed text-slate-400">
+        <div className="mb-1 font-bold text-slate-200">About FOOTUP ASD</div>
+        FOOTUP is a project of FOOTUP ASD, an amateur sports association. The Team Season Pass is a digital service that supports the ecosystem and unlocks premium features for participating teams. FOOTUP ASD remains the sole owner of the brand, community, tournaments, ranking system, database and all intellectual property on the platform.
+      </div>
     </div>
   )
 }
@@ -1273,28 +1285,29 @@ const UpgradeDialog = ({ open, onOpenChange, onSuccess }) => {
               <div className="mx-auto mb-2 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 shadow-2xl shadow-amber-500/40">
                 <Gem className="h-7 w-7 text-slate-950" />
               </div>
-              <DialogTitle className="text-center text-2xl">Upgrade to FOOTUP PRO</DialogTitle>
+              <div className="text-center text-xs uppercase tracking-widest text-amber-200/80">FOOTUP PRO</div>
+              <DialogTitle className="text-center text-2xl">Activate your Team Season Pass</DialogTitle>
             </DialogHeader>
             <div className="mt-2 text-center">
-              <div className="text-5xl font-black">€9.99<span className="text-lg font-normal text-slate-400">/year</span></div>
-              <div className="text-xs text-slate-500">Cancel anytime · Renews yearly</div>
+              <div className="text-5xl font-black">€9.99<span className="text-lg font-normal text-slate-400">/season</span></div>
+              <div className="text-xs text-slate-500">Per team · Runs for one full season · Renews automatically</div>
             </div>
             <div className="mt-4 space-y-2 rounded-2xl bg-white/5 p-4">
-              {['Advanced stats & charts', 'Priority in search', 'PRO badge on profile', 'No ads · Early access'].map(f => (
+              {['Advanced stats & season charts', 'Priority in team searches', 'Season Pass badge on your profile', 'No ads · Early access to new features'].map(f => (
                 <div key={f} className="flex items-center gap-2 text-sm"><Check className="h-4 w-4 text-amber-300" /> {f}</div>
               ))}
             </div>
             <Button onClick={upgrade} className="mt-4 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 hover:opacity-90">
               <CreditCard className="mr-2 h-4 w-4" /> Continue to payment
             </Button>
-            <div className="text-center text-[10px] text-slate-500">💡 Stripe integration coming soon — this is a placeholder that activates PRO instantly</div>
+            <div className="text-center text-[10px] text-slate-500">A digital service offered by FOOTUP ASD — amateur sports association. Stripe integration coming soon; this placeholder activates the Season Pass instantly.</div>
           </>
         )}
         {step === 'processing' && (
           <div className="py-8 text-center">
             <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-amber-500/30 border-t-amber-400" />
-            <div className="text-lg font-bold">Processing payment…</div>
-            <div className="text-xs text-slate-400">Setting up your PRO benefits</div>
+            <div className="text-lg font-bold">Activating your Season Pass…</div>
+            <div className="text-xs text-slate-400">Setting up your team benefits</div>
           </div>
         )}
         {step === 'done' && (
@@ -1302,8 +1315,8 @@ const UpgradeDialog = ({ open, onOpenChange, onSuccess }) => {
             <motion.div initial={{scale:0}} animate={{scale:1}} className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500">
               <Check className="h-8 w-8 text-slate-950" />
             </motion.div>
-            <div className="text-2xl font-black">You're PRO! 🏆</div>
-            <div className="text-sm text-slate-300">Welcome to the elite.</div>
+            <div className="text-2xl font-black">Season Pass activated! 🏆</div>
+            <div className="text-sm text-slate-300">Welcome to FOOTUP PRO.</div>
           </div>
         )}
       </DialogContent>
@@ -1447,13 +1460,14 @@ const AdvancedStatsTab = ({ teamId, isPro, onUpgrade, canUpgrade }) => {
     <Card className="relative overflow-hidden rounded-3xl border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-transparent p-10 text-center backdrop-blur">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(245,158,11,.15),transparent_60%)]" />
       <Lock className="mx-auto mb-3 h-10 w-10 text-amber-300" />
-      <div className="text-2xl font-black">Unlock advanced stats with PRO</div>
+      <div className="text-2xl font-black">Included with the Team Season Pass</div>
       <p className="mx-auto mt-2 max-w-md text-sm text-slate-300">Complete match history · Season evolution graph · Goal trends · Player contribution analysis · Win/loss breakdown</p>
       {canUpgrade && (
         <Button onClick={onUpgrade} className="mt-6 rounded-full bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 hover:opacity-90">
-          <Gem className="mr-2 h-4 w-4" /> Upgrade to PRO — €9.99/year
+          <Gem className="mr-2 h-4 w-4" /> Activate Season Pass — €9.99/season
         </Button>
       )}
+      <div className="mt-3 text-[10px] text-amber-200/70">Offered by FOOTUP ASD · Amateur Sports Association</div>
     </Card>
   )
 
@@ -1534,4 +1548,126 @@ function fmtAgo(d) {
   if (s < 3600) return `${Math.floor(s/60)}m`
   if (s < 86400) return `${Math.floor(s/3600)}h`
   return `${Math.floor(s/86400)}d`
+}
+
+// -------- FOOTER --------
+const Footer = ({ onLegal, landing }) => (
+  <footer className={'mt-8 border-t border-white/5 ' + (landing ? '' : 'mb-20 md:mb-0')}>
+    <div className="mx-auto max-w-6xl px-4 py-8">
+      <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
+        <div className="flex items-center gap-2 text-slate-400">
+          <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500">
+            <Zap className="h-3.5 w-3.5 text-slate-950" />
+          </div>
+          <span className="text-sm font-bold text-white">FOOT<span className="text-emerald-400">UP</span></span>
+          <span className="text-xs">© 2026 FOOTUP ASD. All rights reserved.</span>
+        </div>
+        <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-400">
+          <button onClick={() => onLegal('about')} className="hover:text-white">About FOOTUP ASD</button>
+          <button onClick={() => onLegal('terms')} className="hover:text-white">Terms of Service</button>
+          <button onClick={() => onLegal('privacy')} className="hover:text-white">Privacy Policy</button>
+          <button onClick={() => onLegal('cookies')} className="hover:text-white">Cookie Policy</button>
+        </nav>
+      </div>
+      <div className="mt-4 text-center text-[10px] text-slate-600 md:text-left">
+        All trademarks, logos, designs, database structures, ranking algorithms, statistics systems and platform contents are the exclusive intellectual property of FOOTUP ASD.
+      </div>
+    </div>
+  </footer>
+)
+
+// -------- LEGAL PAGES --------
+const LEGAL_CONTENT = {
+  about: {
+    title: 'About FOOTUP ASD',
+    icon: Shield,
+    body: [
+      { h: 'Who we are', p: 'FOOTUP is a social platform for amateur 5-a-side and 7-a-side football teams, owned and operated by FOOTUP ASD (Associazione Sportiva Dilettantistica). Our mission is to empower amateur football teams to build their identity, challenge rivals across their city and beyond, climb divisions through a real ELO-based ranking system, and become part of the largest amateur football community.' },
+      { h: 'An amateur sports association', p: 'FOOTUP ASD is an amateur sports association. FOOTUP PRO — the Team Season Pass — is not a commercial SaaS subscription but a premium digital service that supports the association ecosystem and enhances amateur football participation for teams that choose to activate it.' },
+      { h: 'Our vision', p: 'We believe every amateur football team deserves the tools that professional clubs use — team pages, real statistics, competitive rankings and a public identity. FOOTUP is the LinkedIn + Instagram + Faceit for amateur football.' },
+      { h: 'Ownership', p: 'FOOTUP ASD is the sole and exclusive owner of the FOOTUP brand, community, tournaments, ranking system, database, trademarks, logos, designs, source code, database structures, ranking algorithms, statistics systems, badges, division architecture and all intellectual property on the platform. User Content remains owned by its authors under the license granted in the Terms of Service.' },
+      { h: 'Contact', p: 'For business, legal, press or partnership inquiries please contact us via the official FOOTUP support channel.' },
+    ],
+  },
+  terms: {
+    title: 'Terms of Service',
+    icon: Award,
+    body: [
+      { h: '1. Acceptance', p: 'By accessing or using FOOTUP you agree to be bound by these Terms of Service. If you do not agree, do not use the platform. These Terms constitute a binding agreement between you and FOOTUP ASD.' },
+      { h: '2. Eligibility', p: 'You must be at least 16 years old to create an account. By registering you represent that all information you provide is accurate and that you have the authority to represent the team you register as its Captain.' },
+      { h: '3. Accounts & Teams', p: 'Each user may create one Team as Captain. You are responsible for all activity on your account and for maintaining the confidentiality of your credentials. You agree not to impersonate other individuals or teams.' },
+      { h: '4. User Content', p: 'You retain ownership of the content you post (photos, videos, posts, comments, team information). By posting content on FOOTUP you grant FOOTUP ASD a worldwide, non-exclusive, royalty-free license to host, display, reproduce and distribute that content solely for the purpose of operating and promoting the platform.' },
+      { h: '5. Prohibited conduct', p: 'You agree not to: (a) publish illegal, harassing, defamatory or hateful content; (b) upload content that infringes third-party intellectual property; (c) manipulate matches, ELO ratings, statistics or leaderboards; (d) attempt to reverse-engineer, scrape or copy the platform, its algorithms or database structures; (e) use the platform for commercial purposes without prior written authorisation.' },
+      { h: '6. Team Season Pass', p: 'FOOTUP is free to use (FOOTUP FREE). The FOOTUP PRO Team Season Pass is an optional digital service offered by FOOTUP ASD at €9.99 per team per season, providing access to premium features for the duration of the season. The Team Season Pass is a member benefit of the FOOTUP ASD ecosystem and is not a commercial software SaaS subscription. It renews automatically at the end of each season unless the automatic renewal is stopped by the Captain; PRO benefits remain active until the end of the current active period. Refunds are handled in accordance with applicable consumer protection law and the internal regulations of FOOTUP ASD.' },
+      { h: '7. Match results & ranking', p: 'Match results, ELO ratings, division assignments and leaderboard positions are computed by the platform and are final once confirmed by both team captains. FOOTUP ASD reserves the right to reverse or annul any result found to be fraudulent or in violation of these Terms.' },
+      { h: '8. Suspension & termination', p: 'FOOTUP ASD may suspend or terminate any account that violates these Terms or applicable law, with or without notice. You may delete your account at any time; PRO subscriptions cancelled but pre-paid periods are not refundable.' },
+      { h: '9. Disclaimer & liability', p: 'The platform is provided "as is" without warranties of any kind. To the maximum extent permitted by law, FOOTUP ASD is not liable for indirect, incidental or consequential damages arising from the use of the platform.' },
+      { h: '10. Governing law', p: 'These Terms are governed by the laws of the country where FOOTUP ASD is domiciled. Any dispute shall be subject to the exclusive jurisdiction of the competent courts of that jurisdiction.' },
+      { h: '11. Changes', p: 'FOOTUP ASD may amend these Terms at any time. Material changes will be communicated in-app. Continued use of the platform after changes constitutes acceptance.' },
+    ],
+  },
+  privacy: {
+    title: 'Privacy Policy',
+    icon: ShieldCheck,
+    body: [
+      { h: 'Data controller', p: 'FOOTUP ASD is the data controller for personal data processed on the FOOTUP platform.' },
+      { h: 'Data we collect', p: 'Account data (email, name, hashed password), team data (name, city, colors, media you upload), activity data (matches, posts, likes, comments, followers), and technical data (device, browser, IP, session cookies).' },
+      { h: 'How we use it', p: 'To operate the platform, authenticate you, display your team profile, compute rankings, deliver match challenges, provide subscription services, prevent fraud, comply with legal obligations and improve the product.' },
+      { h: 'Legal basis (GDPR)', p: 'Contract performance (providing the service you signed up for), legitimate interests (security, fraud prevention, product improvement), consent (for optional communications and non-essential cookies) and legal obligations.' },
+      { h: 'Sharing', p: 'We do not sell your data. We share limited data with processors that help us run the service (hosting, payment processor, email delivery), always under a data processing agreement. Team profiles, posts and rankings are public by design.' },
+      { h: 'Retention', p: 'We retain account data for as long as your account is active plus a reasonable period thereafter to comply with legal obligations. You may request deletion at any time.' },
+      { h: 'Your rights', p: 'Under GDPR you can request access, rectification, erasure, restriction, portability and objection regarding your personal data. Contact FOOTUP ASD to exercise these rights.' },
+      { h: 'Security', p: 'Passwords are stored using strong one-way hashing (scrypt). Session tokens are HMAC-signed and delivered as HttpOnly cookies. Data is transmitted over HTTPS.' },
+      { h: 'Children', p: 'FOOTUP is not intended for children under 16. We do not knowingly collect data from children.' },
+      { h: 'Changes', p: 'We may update this policy. Significant changes will be communicated in-app.' },
+    ],
+  },
+  cookies: {
+    title: 'Cookie Policy',
+    icon: Settings,
+    body: [
+      { h: 'What are cookies', p: 'Cookies are small files stored on your device by your browser when you visit a website. They allow us to keep you signed in, remember your preferences and understand how the platform is used.' },
+      { h: 'Cookies we use', p: 'Strictly necessary: "footup_token" — an HttpOnly, signed session cookie required to keep you authenticated. Without it, you cannot use the platform. Functional: cookies that remember display preferences (theme, language). Analytics (future): aggregated, privacy-friendly usage analytics may be added; you will be able to opt out.' },
+      { h: 'Third-party cookies', p: 'When FOOTUP PRO Stripe integration is enabled, Stripe will set its own cookies during checkout. We do not use advertising or cross-site tracking cookies.' },
+      { h: 'Managing cookies', p: 'You can manage or delete cookies through your browser settings. Disabling the "footup_token" cookie will log you out of FOOTUP.' },
+      { h: 'Contact', p: 'For questions regarding this Cookie Policy, contact FOOTUP ASD.' },
+    ],
+  },
+}
+
+const LegalDialog = ({ page, onClose }) => {
+  const c = page ? LEGAL_CONTENT[page] : null
+  return (
+    <Dialog open={!!page} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto border-white/10 bg-slate-950 text-white sm:max-w-2xl">
+        {c && (
+          <>
+            <DialogHeader>
+              <div className="mb-2 flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500">
+                  <c.icon className="h-5 w-5 text-slate-950" />
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-widest text-slate-400">FOOTUP ASD</div>
+                  <DialogTitle className="text-2xl">{c.title}</DialogTitle>
+                </div>
+              </div>
+            </DialogHeader>
+            <div className="space-y-4">
+              {c.body.map((s, i) => (
+                <div key={i}>
+                  <div className="mb-1 text-sm font-bold text-emerald-300">{s.h}</div>
+                  <p className="text-sm leading-relaxed text-slate-300">{s.p}</p>
+                </div>
+              ))}
+              <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4 text-xs text-slate-400">
+                <div className="font-bold text-white">© 2026 FOOTUP ASD. All rights reserved.</div>
+                <div className="mt-1">All trademarks, logos, designs, database structures, ranking algorithms and statistics systems on this platform are the exclusive intellectual property of FOOTUP ASD.</div>
+              </div>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
 }
