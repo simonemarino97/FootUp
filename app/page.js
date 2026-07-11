@@ -7,7 +7,8 @@ import {
   Home, Users, Swords, Trophy, Bell, Search, LogOut, Plus, Heart, MessageCircle,
   Share2, Camera, Flag, MapPin, Calendar, Clock, Shield, Award, TrendingUp,
   Target, Zap, Star, ChevronRight, X, Check, Circle, Menu, Sparkles, Crown,
-  BarChart3, UserPlus, Settings, Play
+  BarChart3, UserPlus, Settings, Play, Gem, Gift, Rocket, Lock, CreditCard,
+  Copy, LineChart as LineChartIcon, PieChart as PieChartIcon, ShieldCheck
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -58,8 +59,9 @@ const divisionOf = (rating) => {
 export default function App() {
   const [user, setUser] = useState(null)
   const [team, setTeam] = useState(null)
-  const [view, setView] = useState('feed') // feed | myteam | challenges | leaderboard | matches | search
+  const [view, setView] = useState('feed') // feed | myteam | challenges | leaderboard | matches | pricing | admin | referrals
   const [authOpen, setAuthOpen] = useState(false)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [selectedTeamId, setSelectedTeamId] = useState(null)
 
@@ -80,27 +82,36 @@ export default function App() {
     </>
   )
 
+  const isPro = user.plan === 'pro'
+
   return (
     <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,#0b1220_0%,#050810_60%,#000_100%)] text-slate-100">
-      <TopBar user={user} team={team} view={view} setView={setView} onLogout={async () => { await api('/auth/logout', {method:'POST'}); refresh() }} onSelectTeam={setSelectedTeamId} />
+      <TopBar user={user} team={team} view={view} setView={setView} onLogout={async () => { await api('/auth/logout', {method:'POST'}); refresh() }} onSelectTeam={setSelectedTeamId} onUpgrade={() => setUpgradeOpen(true)} />
 
       <main className="mx-auto max-w-6xl px-4 pb-24 pt-6 md:pb-8">
         {selectedTeamId ? (
-          <TeamPage teamId={selectedTeamId} onBack={() => setSelectedTeamId(null)} me={user} myTeam={team} onFollowChanged={refresh} />
+          <TeamPage teamId={selectedTeamId} onBack={() => setSelectedTeamId(null)} me={user} myTeam={team} onFollowChanged={refresh} onUpgrade={() => setUpgradeOpen(true)} />
         ) : view === 'feed' ? (
           <FeedView user={user} team={team} onSelectTeam={setSelectedTeamId} onGoCreate={() => setView('myteam')} />
         ) : view === 'myteam' ? (
-          <MyTeamView user={user} team={team} onTeamCreated={refresh} onSelectTeam={setSelectedTeamId} />
+          <MyTeamView user={user} team={team} onTeamCreated={refresh} onSelectTeam={setSelectedTeamId} onUpgrade={() => setUpgradeOpen(true)} />
         ) : view === 'challenges' ? (
           <ChallengesView team={team} onNeedTeam={() => setView('myteam')} />
         ) : view === 'matches' ? (
           <MatchesView team={team} onSelectTeam={setSelectedTeamId} />
         ) : view === 'leaderboard' ? (
           <LeaderboardView onSelectTeam={setSelectedTeamId} />
+        ) : view === 'pricing' ? (
+          <PricingView user={user} onUpgrade={() => setUpgradeOpen(true)} onRefresh={refresh} />
+        ) : view === 'referrals' ? (
+          <ReferralsView user={user} onUpgrade={() => setUpgradeOpen(true)} />
+        ) : view === 'admin' ? (
+          <AdminView />
         ) : null}
       </main>
 
-      <BottomNav view={view} setView={(v) => { setSelectedTeamId(null); setView(v) }} />
+      <BottomNav view={view} setView={(v) => { setSelectedTeamId(null); setView(v) }} isPro={isPro} isAdmin={user.is_admin} />
+      <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} onSuccess={() => { setUpgradeOpen(false); refresh() }} />
       <Toaster theme="dark" position="top-center" richColors />
     </div>
   )
@@ -257,10 +268,11 @@ const AuthDialog = ({ open, onOpenChange, onSuccess }) => {
 }
 
 // -------- Layout: TopBar + BottomNav --------
-const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam }) => {
+const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }) => {
   const [searchOpen, setSearchOpen] = useState(false)
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
+  const isPro = user?.plan === 'pro'
   useEffect(() => {
     if (!searchOpen) return
     const t = setTimeout(async () => {
@@ -272,12 +284,12 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam }) => {
   return (
     <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/70 backdrop-blur-xl">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2">
+        <button onClick={() => setView('feed')} className="flex items-center gap-2">
           <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500">
             <Zap className="h-4 w-4 text-slate-950" />
           </div>
           <span className="text-xl font-black">FOOT<span className="text-emerald-400">UP</span></span>
-        </div>
+        </button>
         <nav className="hidden items-center gap-1 md:flex">
           {[
             { id:'feed', l:'Feed', i:Home },
@@ -285,13 +297,25 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam }) => {
             { id:'matches', l:'Matches', i:Flag },
             { id:'leaderboard', l:'Ranking', i:Trophy },
             { id:'myteam', l:'My Team', i:Shield },
+            { id:'pricing', l:'Pricing', i:Gem },
           ].map(t => (
             <button key={t.id} onClick={() => setView(t.id)} className={'flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ' + (view === t.id ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white')}>
               <t.i className="h-4 w-4" /> {t.l}
             </button>
           ))}
+          {user?.is_admin && (
+            <button onClick={() => setView('admin')} className={'flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ' + (view === 'admin' ? 'bg-white/10 text-white' : 'text-amber-300 hover:text-white')}>
+              <ShieldCheck className="h-4 w-4" /> Admin
+            </button>
+          )}
         </nav>
         <div className="flex items-center gap-2">
+          {!isPro && (
+            <Button onClick={onUpgrade} size="sm" className="hidden rounded-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/20 hover:opacity-90 md:inline-flex">
+              <Gem className="mr-1.5 h-3.5 w-3.5" /> Upgrade to PRO
+            </Button>
+          )}
+          {isPro && <ProBadge small />}
           <Button size="icon" variant="ghost" onClick={() => setSearchOpen(true)} className="rounded-full hover:bg-white/10"><Search className="h-4 w-4" /></Button>
           <Avatar className="h-9 w-9 border border-white/10">
             <AvatarImage src={team?.logo_url || user?.avatar_url} />
@@ -307,9 +331,12 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam }) => {
           <div className="max-h-80 space-y-2 overflow-y-auto">
             {results.map(t => (
               <button key={t.id} onClick={() => { onSelectTeam(t.id); setSearchOpen(false) }} className="flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-white/5">
-                <div className="grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 text-white font-bold">{t.name[0]}</div>
+                <div className="relative grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 text-white font-bold">
+                  {t.name[0]}
+                  {t.plan === 'pro' && <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-gradient-to-br from-amber-300 to-yellow-500"><Gem className="h-2.5 w-2.5 text-slate-950" /></span>}
+                </div>
                 <div className="flex-1">
-                  <div className="text-sm font-bold">{t.name}</div>
+                  <div className="text-sm font-bold flex items-center gap-1">{t.name}{t.plan === 'pro' && <Gem className="h-3 w-3 text-amber-400" />}</div>
                   <div className="text-xs text-slate-400">{t.city} · Div {t.division.division}</div>
                 </div>
                 <Badge className={'bg-gradient-to-r text-white ' + DIVISION_COLORS[t.division.division]}>{t.rating}</Badge>
@@ -323,17 +350,32 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam }) => {
   )
 }
 
-const BottomNav = ({ view, setView }) => (
+const BottomNav = ({ view, setView, isPro, isAdmin }) => (
   <nav className="fixed bottom-3 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-slate-950/80 p-1.5 backdrop-blur-xl md:hidden">
     {[
       { id:'feed', i:Home }, { id:'challenges', i:Swords }, { id:'matches', i:Flag },
-      { id:'leaderboard', i:Trophy }, { id:'myteam', i:Shield },
+      { id:'leaderboard', i:Trophy }, { id:'myteam', i:Shield }, { id:'pricing', i:Gem },
     ].map(t => (
       <button key={t.id} onClick={() => setView(t.id)} className={'grid h-11 w-11 place-items-center rounded-xl transition ' + (view === t.id ? 'bg-gradient-to-br from-emerald-500 to-cyan-500 text-slate-950' : 'text-slate-400')}>
         <t.i className="h-5 w-5" />
       </button>
     ))}
   </nav>
+)
+
+// -------- PRO BADGE --------
+const ProBadge = ({ small }) => (
+  <div className={'inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/30 ' + (small ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm')}>
+    <Gem className={small ? 'h-3 w-3' : 'h-3.5 w-3.5'} /> PRO
+  </div>
+)
+const PlanBadge = ({ plan }) => plan === 'pro' ? <ProBadge small /> : (
+  <span className="inline-flex items-center rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-bold text-slate-300">FREE</span>
+)
+const FounderBadge = () => (
+  <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-fuchsia-500/20 to-purple-500/20 border border-fuchsia-500/40 px-2 py-0.5 text-xs font-bold text-fuchsia-300">
+    <Star className="h-3 w-3" /> Founder
+  </span>
 )
 
 // -------- FEED --------
@@ -491,9 +533,14 @@ const ComposerDialog = ({ open, onOpenChange, onDone }) => {
 }
 
 // -------- MY TEAM --------
-const MyTeamView = ({ user, team, onTeamCreated, onSelectTeam }) => {
+const MyTeamView = ({ user, team, onTeamCreated, onSelectTeam, onUpgrade }) => {
   if (!team) return <CreateTeamForm onDone={onTeamCreated} />
-  return <TeamPage teamId={team.id} me={user} myTeam={team} onFollowChanged={()=>{}} embedded />
+  return (
+    <div className="space-y-4">
+      <ReferralInline user={user} />
+      <TeamPage teamId={team.id} me={user} myTeam={team} onFollowChanged={()=>{}} onUpgrade={onUpgrade} embedded />
+    </div>
+  )
 }
 
 const CreateTeamForm = ({ onDone }) => {
@@ -565,7 +612,7 @@ const Field = ({ label, children }) => (
 )
 
 // -------- TEAM PAGE --------
-const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, embedded }) => {
+const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embedded }) => {
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('overview')
   const [addPlayerOpen, setAddPlayerOpen] = useState(false)
@@ -600,11 +647,13 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, embedded }) => 
               {t.logo_url ? <img src={t.logo_url} className="h-full w-full rounded-2xl object-cover" alt="" /> : <span className="text-3xl font-black text-white">{t.name[0]}</span>}
             </div>
             <div>
-              <div className="mb-1 flex items-center gap-2">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
                 <Badge className={'bg-gradient-to-r text-white shadow ' + DIVISION_COLORS[t.division.division]}>
                   <Crown className="mr-1 h-3 w-3" /> {t.division.name}
                 </Badge>
                 <Badge variant="outline" className="border-white/20 bg-black/40 text-white backdrop-blur">{t.football_type === 'both' ? '5 & 7-a-side' : `${t.football_type}-a-side`}</Badge>
+                <PlanBadge plan={t.plan} />
+                {t.is_founder && <FounderBadge />}
               </div>
               <h1 className="text-3xl font-black text-white md:text-4xl">{t.name}</h1>
               <div className="mt-1 text-sm text-slate-300"><MapPin className="mr-1 inline h-3 w-3" />{t.city}{t.province ? ', ' + t.province : ''} · Est. {t.founded_year}</div>
@@ -639,6 +688,9 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, embedded }) => 
           <TabsTrigger value="roster" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Roster</TabsTrigger>
           <TabsTrigger value="posts" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Posts</TabsTrigger>
           <TabsTrigger value="history" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Last 10</TabsTrigger>
+          <TabsTrigger value="advanced" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">
+            <Gem className="mr-1 h-3 w-3 text-amber-400" /> Advanced
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -683,6 +735,10 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, embedded }) => 
               <div className={'font-bold ' + (m.delta > 0 ? 'text-emerald-400' : m.delta < 0 ? 'text-rose-400' : 'text-slate-400')}>{m.delta > 0 ? '+' : ''}{m.delta}</div>
             </Card>
           ))}
+        </TabsContent>
+
+        <TabsContent value="advanced" className="mt-4">
+          <AdvancedStatsTab teamId={t.id} isPro={t.plan === 'pro'} onUpgrade={onUpgrade} canUpgrade={isMine} />
         </TabsContent>
       </Tabs>
     </div>
@@ -1065,6 +1121,412 @@ const EmptyState = ({ icon: I, title, desc, action }) => (
     {action && <Button onClick={action.on} className="mt-4 rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90">{action.label}</Button>}
   </div>
 )
+// -------- PRICING VIEW --------
+const FREE_FEATURES = [
+  'Create team profile',
+  'Team logo & photo',
+  'Manage full roster',
+  'Follow other teams',
+  'Social feed access',
+  'Post, like & comment',
+  'Search teams & players',
+  'Match challenges',
+  'ELO ranking',
+  '10 divisions',
+  'Join public tournaments',
+  'Basic team statistics',
+]
+const PRO_FEATURES = [
+  'Everything in FREE',
+  'Advanced statistics dashboard',
+  'Complete match history',
+  'Season stats & evolution graph',
+  'Player contribution analysis',
+  'Goal trends & win/loss charts',
+  'Premium team customization',
+  'Custom banner & themes',
+  'Priority placement in search',
+  'Featured team section',
+  'PRO badge on your profile',
+  'Export team stats to PDF',
+  'Season reports',
+  'Advanced leaderboard filters',
+  'No advertisements',
+  'Early access to new features',
+  'Exclusive PRO badges',
+]
+
+const PricingView = ({ user, onUpgrade, onRefresh }) => {
+  const isPro = user.plan === 'pro'
+  const renew = user.pro_until ? new Date(user.pro_until).toLocaleDateString() : null
+  const cancel = async () => {
+    try { const r = await api('/subscription/cancel', {method:'POST'}); toast.success(r.message); onRefresh?.() } catch (e) { toast.error(e.message) }
+  }
+  return (
+    <div className="space-y-8">
+      <div className="text-center">
+        <Badge className="mb-3 rounded-full bg-amber-500/15 px-4 py-1.5 text-amber-300 border border-amber-500/30 backdrop-blur">
+          <Gem className="mr-1.5 h-3.5 w-3.5" /> FOOTUP PRO
+        </Badge>
+        <h1 className="text-4xl font-black md:text-5xl">Unlock your team's <span className="bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">full potential</span></h1>
+        <p className="mx-auto mt-3 max-w-xl text-slate-400">Start free forever. Upgrade whenever you're ready to dominate with advanced tools.</p>
+      </div>
+
+      <div className="grid gap-5 md:grid-cols-2">
+        {/* FREE */}
+        <motion.div initial={{y:20,opacity:0}} animate={{y:0,opacity:1}}>
+          <Card className={'rounded-3xl border-white/10 bg-white/[.03] p-7 backdrop-blur ' + (!isPro ? 'ring-2 ring-emerald-500/40' : '')}>
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-slate-400">FOOTUP</div>
+                <div className="text-3xl font-black">Free</div>
+              </div>
+              {!isPro && <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Current plan</Badge>}
+            </div>
+            <div className="mb-5">
+              <div className="text-4xl font-black">€0<span className="text-lg font-normal text-slate-400">/year</span></div>
+              <div className="text-xs text-slate-500">Forever. No credit card required.</div>
+            </div>
+            <ul className="space-y-2.5">
+              {FREE_FEATURES.map(f => (
+                <li key={f} className="flex items-start gap-2 text-sm text-slate-200">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /> {f}
+                </li>
+              ))}
+            </ul>
+            <Button disabled className="mt-6 w-full rounded-xl bg-white/5 text-slate-400">Current plan</Button>
+          </Card>
+        </motion.div>
+
+        {/* PRO */}
+        <motion.div initial={{y:20,opacity:0}} animate={{y:0,opacity:1}} transition={{delay:.1}}>
+          <Card className={'relative overflow-hidden rounded-3xl border-amber-500/40 bg-gradient-to-br from-amber-500/15 via-yellow-500/10 to-transparent p-7 backdrop-blur ' + (isPro ? 'ring-2 ring-amber-500/60' : '')}>
+            <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-amber-500/20 blur-3xl" />
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-bold text-amber-300"><Gem className="h-4 w-4" /> FOOTUP</div>
+                <div className="text-3xl font-black bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">PRO</div>
+              </div>
+              {isPro ? <Badge className="bg-amber-500/25 text-amber-200 border border-amber-500/40">Active</Badge> : <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Best value</Badge>}
+            </div>
+            <div className="mb-5">
+              <div className="text-4xl font-black">€9.99<span className="text-lg font-normal text-slate-300">/year</span></div>
+              <div className="text-xs text-amber-200/80">Less than €1 per month</div>
+            </div>
+            <ul className="space-y-2.5">
+              {PRO_FEATURES.map(f => (
+                <li key={f} className="flex items-start gap-2 text-sm text-slate-100">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /> {f}
+                </li>
+              ))}
+            </ul>
+            {isPro ? (
+              <div className="mt-6 space-y-2">
+                <div className="rounded-xl bg-black/30 p-3 text-center text-sm">
+                  <div className="text-xs text-slate-400">Renews</div>
+                  <div className="font-bold text-white">{renew}</div>
+                </div>
+                <Button onClick={cancel} variant="outline" className="w-full rounded-xl border-white/20 bg-white/5 text-white hover:bg-white/10">Cancel subscription</Button>
+              </div>
+            ) : (
+              <Button onClick={onUpgrade} className="mt-6 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/30 hover:opacity-90">
+                <Rocket className="mr-2 h-4 w-4" /> Upgrade to PRO
+              </Button>
+            )}
+          </Card>
+        </motion.div>
+      </div>
+
+      <Card className="rounded-3xl border-white/10 bg-white/[.03] p-6 backdrop-blur">
+        <div className="mb-4 flex items-center gap-2"><Gift className="h-5 w-5 text-fuchsia-400" /><h2 className="text-xl font-black">Earn PRO for free</h2></div>
+        <p className="text-sm text-slate-400">Invite other teams. Get free PRO months.</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="text-2xl font-black">5 invites</div><div className="text-sm text-emerald-300">30 days PRO free</div></div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="text-2xl font-black">20 invites</div><div className="text-sm text-amber-300">90 days PRO free</div></div>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// -------- UPGRADE DIALOG (Stripe placeholder) --------
+const UpgradeDialog = ({ open, onOpenChange, onSuccess }) => {
+  const [busy, setBusy] = useState(false)
+  const [step, setStep] = useState('confirm') // confirm | processing | done
+  const upgrade = async () => {
+    setStep('processing'); setBusy(true)
+    try {
+      // TODO: replace with Stripe Checkout redirect
+      await new Promise(r => setTimeout(r, 1200))
+      await api('/subscription/upgrade', { method:'POST', body: JSON.stringify({ provider: 'placeholder' }) })
+      setStep('done')
+      setTimeout(() => { onSuccess?.(); toast.success('Welcome to FOOTUP PRO! 🏆'); setStep('confirm') }, 900)
+    } catch (e) { toast.error(e.message); setStep('confirm') } finally { setBusy(false) }
+  }
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!busy) onOpenChange(o) }}>
+      <DialogContent className="overflow-hidden border-amber-500/40 bg-gradient-to-br from-slate-950 via-slate-950 to-amber-950/20 text-white sm:max-w-md">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-amber-500/20 blur-3xl" />
+        {step === 'confirm' && (
+          <>
+            <DialogHeader>
+              <div className="mx-auto mb-2 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 shadow-2xl shadow-amber-500/40">
+                <Gem className="h-7 w-7 text-slate-950" />
+              </div>
+              <DialogTitle className="text-center text-2xl">Upgrade to FOOTUP PRO</DialogTitle>
+            </DialogHeader>
+            <div className="mt-2 text-center">
+              <div className="text-5xl font-black">€9.99<span className="text-lg font-normal text-slate-400">/year</span></div>
+              <div className="text-xs text-slate-500">Cancel anytime · Renews yearly</div>
+            </div>
+            <div className="mt-4 space-y-2 rounded-2xl bg-white/5 p-4">
+              {['Advanced stats & charts', 'Priority in search', 'PRO badge on profile', 'No ads · Early access'].map(f => (
+                <div key={f} className="flex items-center gap-2 text-sm"><Check className="h-4 w-4 text-amber-300" /> {f}</div>
+              ))}
+            </div>
+            <Button onClick={upgrade} className="mt-4 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 hover:opacity-90">
+              <CreditCard className="mr-2 h-4 w-4" /> Continue to payment
+            </Button>
+            <div className="text-center text-[10px] text-slate-500">💡 Stripe integration coming soon — this is a placeholder that activates PRO instantly</div>
+          </>
+        )}
+        {step === 'processing' && (
+          <div className="py-8 text-center">
+            <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-amber-500/30 border-t-amber-400" />
+            <div className="text-lg font-bold">Processing payment…</div>
+            <div className="text-xs text-slate-400">Setting up your PRO benefits</div>
+          </div>
+        )}
+        {step === 'done' && (
+          <div className="py-8 text-center">
+            <motion.div initial={{scale:0}} animate={{scale:1}} className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500">
+              <Check className="h-8 w-8 text-slate-950" />
+            </motion.div>
+            <div className="text-2xl font-black">You're PRO! 🏆</div>
+            <div className="text-sm text-slate-300">Welcome to the elite.</div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// -------- REFERRALS --------
+const ReferralInline = ({ user }) => {
+  const [data, setData] = useState(null)
+  useEffect(() => { api('/referrals/me').then(setData).catch(()=>{}) }, [])
+  if (!data) return null
+  const copy = () => { navigator.clipboard.writeText(data.referral_url); toast.success('Referral link copied!') }
+  const progress = data.next_milestone ? Math.round((data.referrals_count / data.next_milestone) * 100) : 100
+  return (
+    <Card className="relative overflow-hidden rounded-3xl border-fuchsia-500/30 bg-gradient-to-br from-fuchsia-500/15 via-purple-500/10 to-transparent p-5 backdrop-blur">
+      <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-fuchsia-500/20 blur-3xl" />
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="mb-1 flex items-center gap-2 text-sm font-bold text-fuchsia-300"><Gift className="h-4 w-4" /> Referral rewards</div>
+          <div className="text-lg font-black">Invite teams. Earn free PRO.</div>
+          <div className="text-xs text-slate-400">Your code: <span className="font-mono font-bold text-fuchsia-300">{data.referral_code}</span> · {data.referrals_count} invited{data.next_milestone && ` · ${data.next_milestone - data.referrals_count} to next reward`}</div>
+          {data.next_milestone && (
+            <div className="mt-2 h-2 w-64 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full rounded-full bg-gradient-to-r from-fuchsia-400 to-purple-500 transition-all" style={{ width: progress + '%' }} />
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={copy} className="rounded-full bg-white/10 hover:bg-white/20"><Copy className="mr-1.5 h-3.5 w-3.5" /> Copy link</Button>
+        </div>
+      </div>
+    </Card>
+  )
+}
+const ReferralsView = ({ user }) => <div className="space-y-4"><h1 className="text-3xl font-black">Referrals</h1><ReferralInline user={user} /></div>
+
+// -------- ADMIN --------
+const AdminView = () => {
+  const [stats, setStats] = useState(null)
+  const [proTeams, setProTeams] = useState([])
+  const [subs, setSubs] = useState([])
+  const [grantOpen, setGrantOpen] = useState(false)
+  const load = async () => {
+    try {
+      const s = await api('/admin/stats'); setStats(s)
+      const t = await api('/admin/pro-teams'); setProTeams(t.teams || [])
+      const b = await api('/admin/subscriptions'); setSubs(b.subscriptions || [])
+    } catch (e) { toast.error(e.message) }
+  }
+  useEffect(() => { load() }, [])
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-amber-400" /><h1 className="text-3xl font-black">Admin</h1></div>
+          <p className="text-sm text-slate-400">Platform overview & controls.</p>
+        </div>
+        <Button onClick={() => setGrantOpen(true)} className="rounded-full bg-gradient-to-r from-amber-300 to-yellow-500 font-bold text-slate-950 hover:opacity-90"><Gift className="mr-1.5 h-3.5 w-3.5" /> Grant PRO</Button>
+      </div>
+
+      {stats && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <StatCard icon={Users} label="Users" value={stats.users} />
+          <StatCard icon={Shield} label="Teams" value={stats.teams} />
+          <StatCard icon={Flag} label="Matches" value={stats.matches} />
+          <StatCard icon={Gem} label="Active PRO" value={stats.pro_active} accent />
+          <StatCard icon={CreditCard} label="Subscriptions" value={stats.subs} />
+        </div>
+      )}
+
+      <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
+        <div className="mb-3 flex items-center gap-2"><Gem className="h-4 w-4 text-amber-400" /><h3 className="font-bold">PRO teams</h3></div>
+        <div className="space-y-2">
+          {proTeams.map(t => (
+            <div key={t.id} className="flex items-center justify-between rounded-xl bg-white/5 p-3">
+              <div className="flex items-center gap-3">
+                <div className="grid h-9 w-9 place-items-center rounded-lg font-bold text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
+                <div>
+                  <div className="text-sm font-bold">{t.name}</div>
+                  <div className="text-xs text-slate-400">{t.city} · rating {t.rating}</div>
+                </div>
+              </div>
+              <div className="text-xs text-amber-300">until {t.pro_until ? new Date(t.pro_until).toLocaleDateString() : '—'}</div>
+            </div>
+          ))}
+          {proTeams.length === 0 && <div className="text-sm text-slate-500">No active PRO teams.</div>}
+        </div>
+      </Card>
+
+      <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
+        <div className="mb-3 flex items-center gap-2"><CreditCard className="h-4 w-4 text-emerald-400" /><h3 className="font-bold">Subscriptions ({subs.length})</h3></div>
+        <div className="space-y-1 text-sm">
+          {subs.slice(0, 10).map(s => (
+            <div key={s.id} className="flex justify-between rounded-lg bg-white/5 px-3 py-2">
+              <span className="font-mono text-xs text-slate-400">{s.user_id.slice(0, 8)}…</span>
+              <span>€{s.amount} · {s.provider}</span>
+              <Badge className={s.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-500/20 text-slate-300'}>{s.status}</Badge>
+            </div>
+          ))}
+          {subs.length === 0 && <div className="text-sm text-slate-500">No subscriptions yet.</div>}
+        </div>
+      </Card>
+
+      <GrantProDialog open={grantOpen} onOpenChange={setGrantOpen} onDone={load} />
+    </div>
+  )
+}
+const GrantProDialog = ({ open, onOpenChange, onDone }) => {
+  const [f, setF] = useState({ user_id:'', days:30 })
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    setBusy(true)
+    try { await api('/admin/grant-pro', { method:'POST', body: JSON.stringify(f) }); toast.success('PRO granted!'); onOpenChange(false); onDone?.() }
+    catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-white/10 bg-slate-950 text-white sm:max-w-md">
+        <DialogHeader><DialogTitle>Grant temporary PRO</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Field label="User ID"><Input value={f.user_id} onChange={e => setF({...f, user_id:e.target.value})} className="border-white/10 bg-white/5" /></Field>
+          <Field label="Days"><Input type="number" value={f.days} onChange={e => setF({...f, days:+e.target.value})} className="border-white/10 bg-white/5" /></Field>
+          <Button onClick={submit} disabled={busy} className="w-full rounded-xl bg-gradient-to-r from-amber-300 to-yellow-500 font-bold text-slate-950 hover:opacity-90">{busy ? 'Granting…' : 'Grant PRO'}</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// -------- ADVANCED STATS --------
+const AdvancedStatsTab = ({ teamId, isPro, onUpgrade, canUpgrade }) => {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    if (!isPro) return
+    api(`/teams/${teamId}/advanced-stats`).then(setData).catch(e => setErr(e.message))
+  }, [teamId, isPro])
+
+  if (!isPro) return (
+    <Card className="relative overflow-hidden rounded-3xl border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-transparent p-10 text-center backdrop-blur">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(245,158,11,.15),transparent_60%)]" />
+      <Lock className="mx-auto mb-3 h-10 w-10 text-amber-300" />
+      <div className="text-2xl font-black">Unlock advanced stats with PRO</div>
+      <p className="mx-auto mt-2 max-w-md text-sm text-slate-300">Complete match history · Season evolution graph · Goal trends · Player contribution analysis · Win/loss breakdown</p>
+      {canUpgrade && (
+        <Button onClick={onUpgrade} className="mt-6 rounded-full bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 hover:opacity-90">
+          <Gem className="mr-2 h-4 w-4" /> Upgrade to PRO — €9.99/year
+        </Button>
+      )}
+    </Card>
+  )
+
+  if (err) return <div className="rounded-2xl border border-white/10 p-5 text-sm text-rose-300">{err}</div>
+  if (!data) return <SkeletonPost />
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard icon={Flag} label="Total matches" value={data.summary.total_matches} />
+        <StatCard icon={Target} label="Avg GF" value={data.summary.avg_goals_for} accent />
+        <StatCard icon={Shield} label="Avg GA" value={data.summary.avg_goals_against} />
+        <StatCard icon={TrendingUp} label="Best streak" value={data.summary.best_streak} />
+      </div>
+
+      <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
+        <div className="mb-3 flex items-center gap-2"><LineChartIcon className="h-4 w-4 text-amber-400" /><h3 className="font-bold">Goal trend (last matches)</h3></div>
+        <GoalTrendChart data={data.goal_trend} />
+      </Card>
+
+      <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
+        <div className="mb-3 flex items-center gap-2"><PieChartIcon className="h-4 w-4 text-emerald-400" /><h3 className="font-bold">Player contribution</h3></div>
+        <div className="space-y-2">
+          {data.contribution.slice(0, 8).map((p, i) => {
+            const total = p.goals + p.assists
+            const max = Math.max(1, data.contribution[0].goals + data.contribution[0].assists)
+            return (
+              <div key={i}>
+                <div className="mb-1 flex items-center justify-between text-sm"><span className="font-bold">{p.name}</span><span className="text-slate-400">{p.goals}G · {p.assists}A</span></div>
+                <div className="h-2 overflow-hidden rounded-full bg-white/5">
+                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400" style={{width: (total/max)*100 + '%'}} />
+                </div>
+              </div>
+            )
+          })}
+          {data.contribution.length === 0 && <div className="text-sm text-slate-500">No player data yet.</div>}
+        </div>
+      </Card>
+
+      <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
+        <div className="mb-3 flex items-center gap-2"><LineChartIcon className="h-4 w-4 text-cyan-400" /><h3 className="font-bold">Match history</h3></div>
+        <div className="max-h-72 overflow-y-auto space-y-2">
+          {data.evolution.map((m, i) => (
+            <div key={i} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-sm">
+              <div className={'grid h-7 w-7 place-items-center rounded font-black ' + (m.result === 'W' ? 'bg-emerald-500/20 text-emerald-400' : m.result === 'L' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-300')}>{m.result}</div>
+              <div className="flex-1 pl-3">vs {m.opponent}</div>
+              <div className="font-bold">{m.score}</div>
+            </div>
+          ))}
+          {data.evolution.length === 0 && <div className="text-sm text-slate-500">No confirmed matches yet.</div>}
+        </div>
+      </Card>
+    </div>
+  )
+}
+const GoalTrendChart = ({ data }) => {
+  if (!data || data.length === 0) return <div className="text-sm text-slate-500">Play some matches to see trends.</div>
+  const max = Math.max(1, ...data.map(d => Math.max(d.scored, d.conceded)))
+  return (
+    <div className="flex items-end gap-2 h-32">
+      {data.map((d, i) => (
+        <div key={i} className="flex-1 flex flex-col justify-end gap-1 items-center">
+          <div className="w-full flex gap-1 items-end h-24">
+            <div className="flex-1 rounded-t bg-gradient-to-t from-emerald-500 to-emerald-300" style={{height: (d.scored/max)*100 + '%'}} title={`Scored: ${d.scored}`} />
+            <div className="flex-1 rounded-t bg-gradient-to-t from-rose-500 to-rose-300" style={{height: (d.conceded/max)*100 + '%'}} title={`Conceded: ${d.conceded}`} />
+          </div>
+          <div className="text-[10px] text-slate-500">#{d.index}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function fmtAgo(d) {
   const t = new Date(d).getTime()
   const s = Math.floor((Date.now() - t) / 1000)

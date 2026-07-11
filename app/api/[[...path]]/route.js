@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
-import { getDb, hashPassword, verifyPassword, signToken, getSessionUser, makeAuthCookie } from '@/lib/auth'
+import { getDb, hashPassword, verifyPassword, signToken, getSessionUser, makeAuthCookie, isPro, planStatus, randCode } from '@/lib/auth'
 import { calcNewRatings, getDivision, START_RATING } from '@/lib/elo'
 
 function corsResp(data, init = {}) {
@@ -25,12 +25,31 @@ async function handler(request, { params }) {
   try {
     const db = await getDb()
 
+    // Helper: enrich team with captain plan info
+    const enrichTeamPlan = async (t) => {
+      if (!t) return t
+      const cap = await db.collection('users').findOne({ id: t.captain_id })
+      const ps = planStatus(cap)
+      return { ...t, plan: ps.plan, is_founder: ps.is_founder, pro_until: ps.pro_until }
+    }
+    const enrichTeamsPlan = async (list) => {
+      const ids = [...new Set(list.map(t => t.captain_id))]
+      const caps = await db.collection('users').find({ id: { $in: ids } }).toArray()
+      const map = Object.fromEntries(caps.map(u => [u.id, planStatus(u)]))
+      return list.map(t => ({ ...t, plan: map[t.captain_id]?.plan || 'free', is_founder: !!map[t.captain_id]?.is_founder, pro_until: map[t.captain_id]?.pro_until || null }))
+    }
+
     // ============ AUTH ============
     if (route === '/auth/register' && method === 'POST') {
-      const { email, password, name } = await request.json()
+      const { email, password, name, referral } = await request.json()
       if (!email || !password) return err('email & password required')
       const existing = await db.collection('users').findOne({ email: email.toLowerCase() })
       if (existing) return err('Email already registered', 409)
+      // Founder Team: first 100 users
+      const userCount = await db.collection('users').countDocuments()
+      let referral_code = randCode(6)
+      // ensure unique
+      while (await db.collection('users').findOne({ referral_code })) referral_code = randCode(6)
       const user = {
         id: uuidv4(),
         email: email.toLowerCase(),
@@ -38,7 +57,31 @@ async function handler(request, { params }) {
         password_hash: hashPassword(password),
         avatar_url: null,
         role: 'captain',
+        plan: 'free',
+        pro_until: null,
+        is_founder: userCount < 100,
+        is_admin: userCount === 0, // first user becomes admin
+        referral_code,
+        referred_by: null,
+        referrals_count: 0,
         created_at: new Date(),
+      }
+      // handle referral
+      if (referral) {
+        const inviter = await db.collection('users').findOne({ referral_code: referral.toUpperCase() })
+        if (inviter) {
+          user.referred_by = inviter.id
+          const newCount = (inviter.referrals_count || 0) + 1
+          const upd = { $inc: { referrals_count: 1 } }
+          // rewards: 5 -> 30 days, 20 -> 90 days
+          if (newCount === 5 || newCount === 20) {
+            const days = newCount === 5 ? 30 : 90
+            const base = inviter.pro_until && new Date(inviter.pro_until) > new Date() ? new Date(inviter.pro_until) : new Date()
+            base.setDate(base.getDate() + days)
+            upd.$set = { plan: 'pro', pro_until: base }
+          }
+          await db.collection('users').updateOne({ id: inviter.id }, upd)
+        }
       }
       await db.collection('users').insertOne(user)
       const token = signToken({ userId: user.id })
@@ -67,7 +110,8 @@ async function handler(request, { params }) {
       const user = await getSessionUser(request)
       if (!user) return corsResp({ user: null })
       const team = await db.collection('teams').findOne({ captain_id: user.id })
-      return corsResp({ user, team: clean(team) })
+      const plan = planStatus(user)
+      return corsResp({ user: { ...user, ...plan }, team: team ? { ...clean(team), plan: plan.plan, is_founder: plan.is_founder } : null })
     }
 
     // ============ TEAMS ============
@@ -113,7 +157,10 @@ async function handler(request, { params }) {
         { city: { $regex: q, $options: 'i' } },
       ]} : {}
       const teams = await db.collection('teams').find(filter).limit(100).toArray()
-      return corsResp({ teams: teams.map(t => ({ ...clean(t), division: getDivision(t.rating) })) })
+      const enriched = await enrichTeamsPlan(teams.map(clean))
+      // PRO priority in search results
+      enriched.sort((a, b) => (b.plan === 'pro') - (a.plan === 'pro') || b.rating - a.rating)
+      return corsResp({ teams: enriched.map(t => ({ ...t, division: getDivision(t.rating) })) })
     }
 
     // /teams/:id ; /teams/:id/players ; /teams/:id/follow
@@ -125,8 +172,9 @@ async function handler(request, { params }) {
       if (!parts[2] && method === 'GET') {
         const players = await db.collection('players').find({ team_id: teamId }).toArray()
         const posts = await db.collection('posts').find({ team_id: teamId }).sort({ created_at: -1 }).limit(20).toArray()
+        const enrichedTeam = await enrichTeamPlan(team)
         return corsResp({
-          team: { ...clean(team), division: getDivision(team.rating) },
+          team: { ...clean(enrichedTeam), division: getDivision(team.rating) },
           players: players.map(clean),
           posts: posts.map(clean),
         })
@@ -348,7 +396,8 @@ async function handler(request, { params }) {
     // ============ LEADERBOARD ============
     if (route === '/leaderboard/teams' && method === 'GET') {
       const teams = await db.collection('teams').find({}).sort({ rating: -1 }).limit(50).toArray()
-      return corsResp({ teams: teams.map(t => ({ ...clean(t), division: getDivision(t.rating) })) })
+      const enriched = await enrichTeamsPlan(teams.map(clean))
+      return corsResp({ teams: enriched.map(t => ({ ...t, division: getDivision(t.rating) })) })
     }
     if (route === '/leaderboard/scorers' && method === 'GET') {
       const players = await db.collection('players').find({}).sort({ goals: -1 }).limit(50).toArray()
@@ -375,12 +424,165 @@ async function handler(request, { params }) {
         const d = getDivision(t.rating).division
         counts[d] = (counts[d] || 0) + 1
       }
+      const sample = { 1:2100, 2:1900, 3:1700, 4:1550, 5:1450, 6:1350, 7:1250, 8:1150, 9:1050, 10:900 }
       const divs = []
       for (let i = 1; i <= 10; i++) {
-        const rating = i === 1 ? 2000 : i === 10 ? 900 : 2000 - (i - 1) * 100
-        divs.push({ ...getDivision(rating), count: counts[i] || 0 })
+        divs.push({ ...getDivision(sample[i]), count: counts[i] || 0 })
       }
       return corsResp({ divisions: divs })
+    }
+
+    // ============ SUBSCRIPTION ============
+    if (route === '/subscription/status' && method === 'GET') {
+      const user = await getSessionUser(request)
+      if (!user) return err('unauthorized', 401)
+      return corsResp(planStatus(user))
+    }
+
+    // Placeholder for Stripe: upgrades user to PRO for 1 year immediately
+    if (route === '/subscription/upgrade' && method === 'POST') {
+      const user = await getSessionUser(request)
+      if (!user) return err('unauthorized', 401)
+      const body = await request.json().catch(() => ({}))
+      // In real Stripe flow: create checkout session, redirect user, then Stripe webhook triggers activation.
+      // TODO(Stripe): replace this block with checkout.session.create + webhook handler on /api/subscription/webhook
+      const base = user.pro_until && new Date(user.pro_until) > new Date() ? new Date(user.pro_until) : new Date()
+      base.setFullYear(base.getFullYear() + 1)
+      await db.collection('users').updateOne({ id: user.id }, { $set: { plan: 'pro', pro_until: base } })
+      await db.collection('subscriptions').insertOne({
+        id: uuidv4(), user_id: user.id, plan: 'pro', amount: 9.99, currency: 'EUR',
+        provider: body.provider || 'placeholder', status: 'active',
+        started_at: new Date(), renews_at: base,
+      })
+      return corsResp({ ok: true, plan: 'pro', pro_until: base })
+    }
+
+    if (route === '/subscription/cancel' && method === 'POST') {
+      const user = await getSessionUser(request)
+      if (!user) return err('unauthorized', 401)
+      // Keep PRO benefits until pro_until then downgrade automatically (planStatus already checks expiry)
+      await db.collection('subscriptions').updateMany({ user_id: user.id, status: 'active' }, { $set: { status: 'cancelled', cancelled_at: new Date() } })
+      return corsResp({ ok: true, message: 'Subscription cancelled. PRO access remains until ' + (user.pro_until || 'end of period') })
+    }
+
+    // ============ REFERRALS ============
+    if (route === '/referrals/me' && method === 'GET') {
+      const user = await getSessionUser(request)
+      if (!user) return err('unauthorized', 401)
+      // ensure has a code
+      let code = user.referral_code
+      if (!code) {
+        code = randCode(6)
+        while (await db.collection('users').findOne({ referral_code: code })) code = randCode(6)
+        await db.collection('users').updateOne({ id: user.id }, { $set: { referral_code: code } })
+      }
+      const referred = await db.collection('users').find({ referred_by: user.id }).project({ id:1, name:1, email:1, created_at:1 }).toArray()
+      const next = user.referrals_count < 5 ? 5 : user.referrals_count < 20 ? 20 : null
+      return corsResp({
+        referral_code: code,
+        referral_url: `${process.env.NEXT_PUBLIC_BASE_URL || ''}/?ref=${code}`,
+        referrals_count: user.referrals_count || 0,
+        referred: referred.map(({ _id, ...r }) => r),
+        next_milestone: next,
+      })
+    }
+
+    if (route === '/referrals/redeem' && method === 'POST') {
+      const user = await getSessionUser(request)
+      if (!user) return err('unauthorized', 401)
+      if (user.referred_by) return err('You already have a referrer', 400)
+      const { code } = await request.json()
+      const inviter = await db.collection('users').findOne({ referral_code: (code || '').toUpperCase() })
+      if (!inviter) return err('Invalid referral code', 404)
+      if (inviter.id === user.id) return err('Cannot refer yourself', 400)
+      await db.collection('users').updateOne({ id: user.id }, { $set: { referred_by: inviter.id } })
+      const newCount = (inviter.referrals_count || 0) + 1
+      const upd = { $inc: { referrals_count: 1 } }
+      if (newCount === 5 || newCount === 20) {
+        const days = newCount === 5 ? 30 : 90
+        const base = inviter.pro_until && new Date(inviter.pro_until) > new Date() ? new Date(inviter.pro_until) : new Date()
+        base.setDate(base.getDate() + days)
+        upd.$set = { plan: 'pro', pro_until: base }
+      }
+      await db.collection('users').updateOne({ id: inviter.id }, upd)
+      return corsResp({ ok: true })
+    }
+
+    // ============ ADMIN ============
+    if (parts[0] === 'admin') {
+      const user = await getSessionUser(request)
+      if (!user?.is_admin) return err('forbidden', 403)
+
+      if (route === '/admin/subscriptions' && method === 'GET') {
+        const subs = await db.collection('subscriptions').find({}).sort({ started_at: -1 }).limit(200).toArray()
+        return corsResp({ subscriptions: subs.map(clean) })
+      }
+      if (route === '/admin/pro-teams' && method === 'GET') {
+        const proUsers = await db.collection('users').find({ plan: 'pro', pro_until: { $gt: new Date() } }).toArray()
+        const ids = proUsers.map(u => u.id)
+        const teams = await db.collection('teams').find({ captain_id: { $in: ids } }).toArray()
+        return corsResp({ teams: await enrichTeamsPlan(teams.map(clean)) })
+      }
+      if (route === '/admin/grant-pro' && method === 'POST') {
+        const { user_id, days } = await request.json()
+        const target = await db.collection('users').findOne({ id: user_id })
+        if (!target) return err('user not found', 404)
+        const base = target.pro_until && new Date(target.pro_until) > new Date() ? new Date(target.pro_until) : new Date()
+        base.setDate(base.getDate() + (parseInt(days) || 30))
+        await db.collection('users').updateOne({ id: user_id }, { $set: { plan: 'pro', pro_until: base } })
+        await db.collection('subscriptions').insertOne({
+          id: uuidv4(), user_id, plan: 'pro', amount: 0, currency: 'EUR',
+          provider: 'admin-grant', status: 'active', started_at: new Date(), renews_at: base,
+        })
+        return corsResp({ ok: true, pro_until: base })
+      }
+      if (route === '/admin/stats' && method === 'GET') {
+        const [users, teams, matches, subs, proActive] = await Promise.all([
+          db.collection('users').countDocuments(),
+          db.collection('teams').countDocuments(),
+          db.collection('matches').countDocuments(),
+          db.collection('subscriptions').countDocuments(),
+          db.collection('users').countDocuments({ plan: 'pro', pro_until: { $gt: new Date() } }),
+        ])
+        return corsResp({ users, teams, matches, subs, pro_active: proActive })
+      }
+    }
+
+    // ============ ADVANCED STATS (PRO only) ============
+    if (parts[0] === 'teams' && parts[1] && parts[2] === 'advanced-stats' && method === 'GET') {
+      const teamId = parts[1]
+      const team = await db.collection('teams').findOne({ id: teamId })
+      if (!team) return err('team not found', 404)
+      const captain = await db.collection('users').findOne({ id: team.captain_id })
+      if (!isPro(captain)) return err('PRO subscription required', 402)
+      const matches = await db.collection('matches').find({
+        $or: [{ home_team_id: teamId }, { away_team_id: teamId }], status: 'confirmed'
+      }).sort({ created_at: 1 }).toArray()
+      // Build evolution: rating over time approximated from last_matches (delta chain)
+      let r = 1000
+      const evolution = []
+      for (const m of matches) {
+        const c = m.confirmations[m.home_team_id]
+        if (!c) continue
+        const isHome = m.home_team_id === teamId
+        const sh = c.score_home, sa = c.score_away
+        const result = (isHome ? sh > sa : sa > sh) ? 'W' : (sh === sa ? 'D' : 'L')
+        evolution.push({ date: m.created_at, result, score: isHome ? `${sh}-${sa}` : `${sa}-${sh}`, opponent: isHome ? m.away_team_name : m.home_team_name })
+      }
+      const players = await db.collection('players').find({ team_id: teamId }).toArray()
+      const contribution = players.map(p => ({ name: `${p.first_name} ${p.last_name}`, goals: p.goals || 0, assists: p.assists || 0, mvps: p.mvps || 0, matches: p.matches || 0 })).sort((a,b) => (b.goals + b.assists) - (a.goals + a.assists))
+      const goalTrend = (team.last_matches || []).slice().reverse().map((m, i) => ({ index: i+1, scored: parseInt(m.score.split('-')[0]) || 0, conceded: parseInt(m.score.split('-')[1]) || 0 }))
+      return corsResp({
+        evolution,
+        goal_trend: goalTrend,
+        contribution,
+        summary: {
+          total_matches: team.matches_played || 0,
+          avg_goals_for: team.matches_played ? (team.goals_for / team.matches_played).toFixed(2) : 0,
+          avg_goals_against: team.matches_played ? (team.goals_against / team.matches_played).toFixed(2) : 0,
+          best_streak: team.best_streak || 0,
+        }
+      })
     }
 
     if (route === '/' || route === '/root') return corsResp({ message: 'FOOTUP API running' })
