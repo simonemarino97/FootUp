@@ -5,12 +5,20 @@ export const metadata = {
   title: 'FOOTUP — The social network for amateur football',
   description: 'Create your 5-a-side or 7-a-side team, challenge rivals, climb 10 divisions with a real ELO ranking, and become the best amateur football team.',
   keywords: ['football', 'soccer', 'calcio', '5-a-side', '7-a-side', 'amateur football', 'ELO ranking', 'tournaments'],
+  icons: {
+    icon: [
+      { url: '/favicon.png', type: 'image/png', sizes: '64x64' },
+      { url: '/favicon-32.png', type: 'image/png', sizes: '32x32' },
+    ],
+    apple: '/logo-256.png',
+  },
   openGraph: {
     title: 'FOOTUP — The social network for amateur football',
     description: 'Team identity. ELO ranking. 10 divisions. Real rivalries.',
     type: 'website',
+    images: ['/logo-256.png'],
   },
-  twitter: { card: 'summary_large_image', title: 'FOOTUP', description: 'The social network for amateur football' },
+  twitter: { card: 'summary', title: 'FOOTUP', description: 'The social network for amateur football', images: ['/logo-256.png'] },
 }
 
 export default function RootLayout({ children }) {

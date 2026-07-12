@@ -125,10 +125,7 @@ export default function App() {
 const SplashLoading = () => (
   <div className="grid min-h-screen place-items-center bg-black">
     <motion.div initial={{scale:.8, opacity:0}} animate={{scale:1, opacity:1}} transition={{duration:.6}} className="text-center">
-      <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 shadow-2xl shadow-emerald-500/30">
-        <Zap className="h-8 w-8 text-slate-950" />
-      </div>
-      <div className="text-3xl font-black tracking-tight text-white">FOOT<span className="text-emerald-400">UP</span></div>
+      <img src="/logo.png" alt="FOOTUP" className="mx-auto h-24 w-24 drop-shadow-[0_0_40px_rgba(16,185,129,0.5)]" />
     </motion.div>
   </div>
 )
@@ -143,10 +140,8 @@ const Landing = ({ onGetStarted, onLegal }) => (
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(16,185,129,.25),transparent_40%),radial-gradient(circle_at_70%_60%,rgba(14,165,233,.2),transparent_45%)]" />
       </div>
       <nav className="relative z-10 flex items-center justify-between px-6 py-6 md:px-12">
-        <div className="flex items-center gap-2">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 shadow-lg shadow-emerald-500/30">
-            <Zap className="h-5 w-5 text-slate-950" />
-          </div>
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="FOOTUP" className="h-11 w-11 drop-shadow-[0_0_20px_rgba(16,185,129,0.4)]" />
           <span className="text-2xl font-black tracking-tight">FOOT<span className="text-emerald-400">UP</span></span>
         </div>
         <Button onClick={onGetStarted} className="rounded-full bg-white/10 backdrop-blur-md border border-white/20 hover:bg-white/20">
@@ -247,9 +242,7 @@ const AuthDialog = ({ open, onOpenChange, onSuccess }) => {
       <DialogContent className="border-white/10 bg-slate-950 text-white sm:max-w-md">
         <DialogHeader>
           <div className="mb-2 flex items-center gap-2">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500">
-              <Zap className="h-4 w-4 text-slate-950" />
-            </div>
+            <img src="/logo.png" alt="FOOTUP" className="h-10 w-10" />
             <span className="text-xl font-black">FOOT<span className="text-emerald-400">UP</span></span>
           </div>
           <DialogTitle className="text-2xl">{mode === 'login' ? 'Welcome back, captain' : 'Create your captain account'}</DialogTitle>
@@ -290,9 +283,7 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
     <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/70 backdrop-blur-xl">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
         <button onClick={() => setView('feed')} className="flex items-center gap-2">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500">
-            <Zap className="h-4 w-4 text-slate-950" />
-          </div>
+          <img src="/logo.png" alt="FOOTUP" className="h-10 w-10" />
           <span className="text-xl font-black">FOOT<span className="text-emerald-400">UP</span></span>
         </button>
         <nav className="hidden items-center gap-1 md:flex">
@@ -1556,9 +1547,7 @@ const Footer = ({ onLegal, landing }) => (
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
         <div className="flex items-center gap-2 text-slate-400">
-          <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500">
-            <Zap className="h-3.5 w-3.5 text-slate-950" />
-          </div>
+          <img src="/logo.png" alt="FOOTUP" className="h-8 w-8" />
           <span className="text-sm font-bold text-white">FOOT<span className="text-emerald-400">UP</span></span>
           <span className="text-xs">© 2026 FOOTUP ASD. All rights reserved.</span>
         </div>
