@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
+import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { getDb, hashPassword, verifyPassword, signToken, getSessionUser, makeAuthCookie, isPro, planStatus, randCode } from '@/lib/auth'
 import { calcNewRatings, getDivision, START_RATING } from '@/lib/elo'
@@ -112,6 +113,124 @@ async function handler(request, { params }) {
       const team = await db.collection('teams').findOne({ captain_id: user.id })
       const plan = planStatus(user)
       return corsResp({ user: { ...user, ...plan }, team: team ? { ...clean(team), plan: plan.plan, is_founder: plan.is_founder } : null })
+    }
+
+    // ============ GOOGLE OAUTH ============
+    const GOOGLE_REDIRECT = `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/google/callback`
+
+    if (route === '/auth/google/start' && method === 'GET') {
+      if (!process.env.GOOGLE_CLIENT_ID) return err('Google OAuth not configured', 500)
+      const url = new URL(request.url)
+      const referral = url.searchParams.get('ref') || ''
+      const state = crypto.randomBytes(16).toString('hex') + (referral ? '|' + referral : '')
+      const params = new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        redirect_uri: GOOGLE_REDIRECT,
+        response_type: 'code',
+        scope: 'openid email profile',
+        access_type: 'online',
+        prompt: 'select_account',
+        state,
+      })
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
+      const res = NextResponse.redirect(authUrl)
+      res.headers.append('Set-Cookie', `footup_oauth_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`)
+      return res
+    }
+
+    if (route === '/auth/google/callback' && method === 'GET') {
+      const url = new URL(request.url)
+      const code = url.searchParams.get('code')
+      const state = url.searchParams.get('state')
+      const savedState = request.cookies.get('footup_oauth_state')?.value
+      if (!code) return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/?oauth_error=missing_code`)
+      if (!state || !savedState || state !== savedState) {
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/?oauth_error=state_mismatch`)
+      }
+      try {
+        // Exchange code for token
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: process.env.GOOGLE_CLIENT_ID,
+            client_secret: process.env.GOOGLE_CLIENT_SECRET,
+            redirect_uri: GOOGLE_REDIRECT,
+            grant_type: 'authorization_code',
+          }),
+        })
+        const tokenData = await tokenRes.json()
+        if (!tokenRes.ok) {
+          console.error('Google token error', tokenData)
+          return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/?oauth_error=token_exchange`)
+        }
+        // Get userinfo
+        const uiRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        })
+        const gu = await uiRes.json()
+        if (!uiRes.ok || !gu.email) {
+          console.error('Google userinfo error', gu)
+          return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/?oauth_error=userinfo`)
+        }
+        // Upsert user
+        const email = gu.email.toLowerCase()
+        let user = await db.collection('users').findOne({ email })
+        const referral = state.includes('|') ? state.split('|')[1] : null
+        if (!user) {
+          const userCount = await db.collection('users').countDocuments()
+          let referral_code = randCode(6)
+          while (await db.collection('users').findOne({ referral_code })) referral_code = randCode(6)
+          user = {
+            id: uuidv4(),
+            email,
+            name: gu.name || gu.given_name || email.split('@')[0],
+            password_hash: null,
+            google_id: gu.sub,
+            avatar_url: gu.picture || null,
+            role: 'captain',
+            plan: 'free',
+            pro_until: null,
+            is_founder: userCount < 100,
+            is_admin: userCount === 0,
+            referral_code,
+            referred_by: null,
+            referrals_count: 0,
+            created_at: new Date(),
+          }
+          if (referral) {
+            const inviter = await db.collection('users').findOne({ referral_code: referral.toUpperCase() })
+            if (inviter) {
+              user.referred_by = inviter.id
+              const newCount = (inviter.referrals_count || 0) + 1
+              const upd = { $inc: { referrals_count: 1 } }
+              if (newCount === 5 || newCount === 20) {
+                const days = newCount === 5 ? 30 : 90
+                const base = inviter.pro_until && new Date(inviter.pro_until) > new Date() ? new Date(inviter.pro_until) : new Date()
+                base.setDate(base.getDate() + days)
+                upd.$set = { plan: 'pro', pro_until: base }
+              }
+              await db.collection('users').updateOne({ id: inviter.id }, upd)
+            }
+          }
+          await db.collection('users').insertOne(user)
+        } else {
+          // Link Google + refresh avatar if empty
+          const upd = { $set: {} }
+          if (!user.google_id) upd.$set.google_id = gu.sub
+          if (!user.avatar_url && gu.picture) upd.$set.avatar_url = gu.picture
+          if (Object.keys(upd.$set).length) await db.collection('users').updateOne({ id: user.id }, upd)
+        }
+        const token = signToken({ userId: user.id })
+        const res = NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/?oauth=success`)
+        res.headers.append('Set-Cookie', makeAuthCookie(token))
+        res.headers.append('Set-Cookie', 'footup_oauth_state=; Path=/; Max-Age=0')
+        return res
+      } catch (e) {
+        console.error('OAuth callback error', e)
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/?oauth_error=exception`)
+      }
     }
 
     // ============ TEAMS ============
