@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid'
 import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { getDb, hashPassword, verifyPassword, signToken, getSessionUser, makeAuthCookie, isPro, planStatus, randCode } from '@/lib/auth'
-import { calcNewRatings, getDivision, START_RATING } from '@/lib/elo'
+import { calcNewRatings, getDivision, START_RATING, computeReputation, computeBadges } from '@/lib/elo'
 
 function corsResp(data, init = {}) {
   const res = NextResponse.json(data, init)
@@ -292,11 +292,62 @@ async function handler(request, { params }) {
         const players = await db.collection('players').find({ team_id: teamId }).toArray()
         const posts = await db.collection('posts').find({ team_id: teamId }).sort({ created_at: -1 }).limit(20).toArray()
         const enrichedTeam = await enrichTeamPlan(team)
+        const reputation = computeReputation(team)
+        const badges = computeBadges(team)
+        const divisionEvents = await db.collection('division_events').find({ team_id: teamId }).sort({ at: -1 }).limit(5).toArray()
+        // extra derived stats
+        const gd = (team.goals_for || 0) - (team.goals_against || 0)
+        const avg_gf = team.matches_played ? +(team.goals_for / team.matches_played).toFixed(2) : 0
+        const avg_ga = team.matches_played ? +(team.goals_against / team.matches_played).toFixed(2) : 0
         return corsResp({
-          team: { ...clean(enrichedTeam), division: getDivision(team.rating) },
+          team: {
+            ...clean(enrichedTeam),
+            division: getDivision(team.rating),
+            reputation, badges,
+            goal_difference: gd, avg_goals_for: avg_gf, avg_goals_against: avg_ga,
+            clean_sheets: team.clean_sheets || 0,
+            largest_victory: team.largest_victory || 0,
+            largest_defeat: team.largest_defeat || 0,
+            tournament_wins: team.tournament_wins || 0,
+            total_yellows: team.total_yellows || 0,
+            total_reds: team.total_reds || 0,
+            division_events: divisionEvents.map(clean),
+          },
           players: players.map(clean),
           posts: posts.map(clean),
         })
+      }
+
+      if (parts[2] === 'history' && method === 'GET') {
+        const matches = await db.collection('matches').find({
+          $or: [{ home_team_id: teamId }, { away_team_id: teamId }],
+          status: 'confirmed'
+        }).sort({ created_at: -1 }).limit(200).toArray()
+        // Map with ELO delta from team.last_matches when available
+        const lastMap = Object.fromEntries((team.last_matches || []).filter(m => m.match_id).map(m => [m.match_id, m]))
+        const list = matches.map(m => {
+          const isHome = m.home_team_id === teamId
+          const c = m.confirmations?.[m.home_team_id]
+          const sh = c?.score_home, sa = c?.score_away
+          const scoreLine = isHome ? `${sh}-${sa}` : `${sa}-${sh}`
+          const result = sh === sa ? 'D' : (isHome ? (sh > sa ? 'W' : 'L') : (sa > sh ? 'W' : 'L'))
+          const opponent = isHome ? m.away_team_name : m.home_team_name
+          const opponent_id = isHome ? m.away_team_id : m.home_team_id
+          const info = lastMap[m.id] || {}
+          return {
+            match_id: m.id, opponent, opponent_id, score: scoreLine, result,
+            competition: m.importance > 1 ? 'Tournament' : 'League',
+            venue: m.facility || m.city,
+            date: m.date || m.created_at,
+            delta: info.delta ?? null,
+            season: info.season || null,
+          }
+        })
+        return corsResp({ matches: list })
+      }
+
+      if (parts[2] === 'badges' && method === 'GET') {
+        return corsResp({ badges: computeBadges(team) })
       }
 
       if (!parts[2] && method === 'PUT') {
@@ -514,9 +565,45 @@ async function handler(request, { params }) {
 
     // ============ LEADERBOARD ============
     if (route === '/leaderboard/teams' && method === 'GET') {
-      const teams = await db.collection('teams').find({}).sort({ rating: -1 }).limit(50).toArray()
-      const enriched = await enrichTeamsPlan(teams.map(clean))
-      return corsResp({ teams: enriched.map(t => ({ ...t, division: getDivision(t.rating) })) })
+      const url = new URL(request.url)
+      const ft = url.searchParams.get('football_type')
+      const city = url.searchParams.get('city')
+      const div = url.searchParams.get('division')
+      const filter = {}
+      if (ft && ft !== 'all') filter.football_type = { $in: ft === 'both' ? ['5','7','both'] : [ft, 'both'] }
+      if (city) filter.city = { $regex: `^${city}$`, $options: 'i' }
+      const teams = await db.collection('teams').find(filter).sort({ rating: -1 }).limit(200).toArray()
+      let enriched = await enrichTeamsPlan(teams.map(clean))
+      enriched = enriched.map(t => ({ ...t, division: getDivision(t.rating), reputation: computeReputation(t) }))
+      if (div && div !== 'all') enriched = enriched.filter(t => t.division.division === parseInt(div))
+      return corsResp({ teams: enriched.slice(0, 100) })
+    }
+
+    if (route === '/leaderboard/defense' && method === 'GET') {
+      const teams = await db.collection('teams').find({ matches_played: { $gt: 0 } }).toArray()
+      const enriched = teams.map(t => ({
+        ...clean(t),
+        division: getDivision(t.rating),
+        avg_ga: t.goals_against / t.matches_played,
+      })).sort((a, b) => a.avg_ga - b.avg_ga).slice(0, 50)
+      return corsResp({ teams: enriched })
+    }
+
+    if (route === '/leaderboard/fairplay' && method === 'GET') {
+      const teams = await db.collection('teams').find({ matches_played: { $gt: 0 } }).toArray()
+      const enriched = teams.map(t => ({
+        ...clean(t),
+        division: getDivision(t.rating),
+        cards_per_match: ((t.total_yellows || 0) + (t.total_reds || 0) * 2) / t.matches_played,
+        total_yellows: t.total_yellows || 0,
+        total_reds: t.total_reds || 0,
+      })).sort((a, b) => a.cards_per_match - b.cards_per_match).slice(0, 50)
+      return corsResp({ teams: enriched })
+    }
+
+    if (route === '/leaderboard/active' && method === 'GET') {
+      const teams = await db.collection('teams').find({}).sort({ matches_played: -1 }).limit(50).toArray()
+      return corsResp({ teams: teams.map(t => ({ ...clean(t), division: getDivision(t.rating) })) })
     }
     if (route === '/leaderboard/scorers' && method === 'GET') {
       const players = await db.collection('players').find({}).sort({ goals: -1 }).limit(50).toArray()
@@ -723,7 +810,17 @@ async function finalizeMatch(db, match) {
   if (sh > sa) scoreA = 1
   else if (sh < sa) scoreA = 0
   else scoreA = 0.5
-  const { newA, newB, deltaA, deltaB } = calcNewRatings(home.rating, away.rating, scoreA, home.streak, away.streak)
+  const importance = match.importance || 1
+  const { newA, newB, deltaA, deltaB } = calcNewRatings(home.rating, away.rating, scoreA, home.streak, away.streak, importance)
+
+  const oldDivHome = getDivision(home.rating).division
+  const newDivHome = getDivision(newA).division
+  const oldDivAway = getDivision(away.rating).division
+  const newDivAway = getDivision(newB).division
+
+  const homeDiff = sh - sa
+  const awayDiff = sa - sh
+  const currentSeason = getCurrentSeason()
 
   const homeUpd = {
     rating: newA,
@@ -735,7 +832,16 @@ async function finalizeMatch(db, match) {
     losses: home.losses + (scoreA === 0 ? 1 : 0),
     streak: scoreA === 1 ? (home.streak || 0) + 1 : 0,
     best_streak: scoreA === 1 ? Math.max(home.best_streak || 0, (home.streak || 0) + 1) : home.best_streak || 0,
-    last_matches: [{ opponent: away.name, score: `${sh}-${sa}`, result: scoreA === 1 ? 'W' : scoreA === 0 ? 'L' : 'D', delta: deltaA, date: new Date() }, ...(home.last_matches || [])].slice(0, 10),
+    clean_sheets: (home.clean_sheets || 0) + (sa === 0 ? 1 : 0),
+    largest_victory: homeDiff > (home.largest_victory || 0) && scoreA === 1 ? homeDiff : (home.largest_victory || 0),
+    largest_defeat: homeDiff < (home.largest_defeat || 0) && scoreA === 0 ? homeDiff : (home.largest_defeat || 0),
+    total_yellows: (home.total_yellows || 0) + ((c.yellows || []).length),
+    total_reds: (home.total_reds || 0) + ((c.reds || []).length),
+    last_matches: [{
+      match_id: match.id, opponent: away.name, opponent_id: away.id, score: `${sh}-${sa}`,
+      result: scoreA === 1 ? 'W' : scoreA === 0 ? 'L' : 'D', delta: deltaA, importance, season: currentSeason, date: new Date()
+    }, ...(home.last_matches || [])].slice(0, 20),
+    current_season: currentSeason,
   }
   const awayUpd = {
     rating: newB,
@@ -747,20 +853,52 @@ async function finalizeMatch(db, match) {
     losses: away.losses + (scoreA === 1 ? 1 : 0),
     streak: scoreA === 0 ? (away.streak || 0) + 1 : 0,
     best_streak: scoreA === 0 ? Math.max(away.best_streak || 0, (away.streak || 0) + 1) : away.best_streak || 0,
-    last_matches: [{ opponent: home.name, score: `${sa}-${sh}`, result: scoreA === 0 ? 'W' : scoreA === 1 ? 'L' : 'D', delta: deltaB, date: new Date() }, ...(away.last_matches || [])].slice(0, 10),
+    clean_sheets: (away.clean_sheets || 0) + (sh === 0 ? 1 : 0),
+    largest_victory: awayDiff > (away.largest_victory || 0) && scoreA === 0 ? awayDiff : (away.largest_victory || 0),
+    largest_defeat: awayDiff < (away.largest_defeat || 0) && scoreA === 1 ? awayDiff : (away.largest_defeat || 0),
+    total_yellows: (away.total_yellows || 0) + ((c.yellows || []).length),
+    total_reds: (away.total_reds || 0) + ((c.reds || []).length),
+    last_matches: [{
+      match_id: match.id, opponent: home.name, opponent_id: home.id, score: `${sa}-${sh}`,
+      result: scoreA === 0 ? 'W' : scoreA === 1 ? 'L' : 'D', delta: deltaB, importance, season: currentSeason, date: new Date()
+    }, ...(away.last_matches || [])].slice(0, 20),
+    current_season: currentSeason,
   }
   await db.collection('teams').updateOne({ id: home.id }, { $set: homeUpd })
   await db.collection('teams').updateOne({ id: away.id }, { $set: awayUpd })
 
-  // player stats update from goals/assists arrays (playerId strings)
+  // Persist division change events
+  if (newDivHome !== oldDivHome) {
+    await db.collection('division_events').insertOne({
+      id: uuidv4(), team_id: home.id, from_division: oldDivHome, to_division: newDivHome,
+      type: newDivHome < oldDivHome ? 'promotion' : 'relegation', at: new Date(), season: currentSeason,
+    })
+  }
+  if (newDivAway !== oldDivAway) {
+    await db.collection('division_events').insertOne({
+      id: uuidv4(), team_id: away.id, from_division: oldDivAway, to_division: newDivAway,
+      type: newDivAway < oldDivAway ? 'promotion' : 'relegation', at: new Date(), season: currentSeason,
+    })
+  }
+
+  // Player stats
   const bumpPlayers = async (goalsArr, assistsArr, yellowsArr, redsArr, mvp) => {
-    for (const pid of goalsArr || []) await db.collection('players').updateOne({ id: pid }, { $inc: { goals: 1, matches: 0 } })
+    for (const pid of goalsArr || []) await db.collection('players').updateOne({ id: pid }, { $inc: { goals: 1 } })
     for (const pid of assistsArr || []) await db.collection('players').updateOne({ id: pid }, { $inc: { assists: 1 } })
     for (const pid of yellowsArr || []) await db.collection('players').updateOne({ id: pid }, { $inc: { yellows: 1 } })
     for (const pid of redsArr || []) await db.collection('players').updateOne({ id: pid }, { $inc: { reds: 1 } })
     if (mvp) await db.collection('players').updateOne({ id: mvp }, { $inc: { mvps: 1 } })
   }
   await bumpPlayers(c.goals, c.assists, c.yellows, c.reds, c.mvp)
+}
+
+function getCurrentSeason() {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  // Season runs Sep–Aug; before Sep => previous year label
+  const startYear = m >= 8 ? y : y - 1
+  return `${startYear}/${(startYear + 1).toString().slice(-2)}`
 }
 
 export const GET = handler

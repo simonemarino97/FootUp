@@ -679,6 +679,14 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
       <div className="relative overflow-hidden rounded-3xl border border-white/10">
         <img src={t.cover_url || COVER_DEFAULT} alt="" className="h-56 w-full object-cover md:h-72" />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-transparent" />
+        {t.reputation && (
+          <div className="absolute right-4 top-4 md:right-6 md:top-6">
+            <div className="rounded-2xl border border-white/20 bg-black/50 px-3 py-2 text-center backdrop-blur">
+              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-300">Overall</div>
+              <div className="text-3xl font-black leading-none text-white md:text-4xl">{t.reputation.overall}</div>
+            </div>
+          </div>
+        )}
         <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 p-6">
           <div className="flex items-end gap-4">
             <div className="grid h-20 w-20 place-items-center rounded-2xl border-2 border-white/20 shadow-2xl md:h-24 md:w-24" style={{ background: `linear-gradient(135deg, ${t.primary_color}, ${t.secondary_color})` }}>
@@ -690,6 +698,7 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
                   <Crown className="mr-1 h-3 w-3" /> {t.division.name}
                 </Badge>
                 <Badge variant="outline" className="border-white/20 bg-black/40 text-white backdrop-blur">{t.football_type === 'both' ? '5 & 7-a-side' : `${t.football_type}-a-side`}</Badge>
+                <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300"><TrendingUp className="mr-1 h-3 w-3" /> {t.rating} ELO</Badge>
                 <PlanBadge plan={t.plan} />
                 {t.is_founder && <FounderBadge />}
               </div>
@@ -739,7 +748,20 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="mt-4">
+        <TabsContent value="overview" className="mt-4 space-y-4">
+          <ReputationCard team={t} />
+          {(t.badges || []).length > 0 && (
+            <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
+              <div className="mb-3 flex items-center gap-2"><Award className="h-4 w-4 text-amber-400" /><h3 className="text-sm font-black uppercase tracking-wide">Badges earned</h3></div>
+              <div className="flex flex-wrap gap-2">
+                {t.badges.map(b => (
+                  <div key={b.id} className={'inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r ' + b.color + ' px-3 py-1 text-xs font-bold text-white shadow-md'}>
+                    <Star className="h-3 w-3" /> {b.label}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
           <div className="grid gap-3 md:grid-cols-2">
             <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
               <div className="mb-2 text-sm font-bold text-slate-400">Current streak</div>
@@ -749,6 +771,19 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
             <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
               <div className="mb-2 text-sm font-bold text-slate-400">Followers</div>
               <div className="text-4xl font-black">{(t.followers || []).length}</div>
+            </Card>
+            <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
+              <div className="mb-2 text-sm font-bold text-slate-400">Clean sheets</div>
+              <div className="text-4xl font-black">{t.clean_sheets || 0}</div>
+              <div className="mt-1 text-xs text-slate-500">Matches with 0 conceded</div>
+            </Card>
+            <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
+              <div className="mb-2 text-sm font-bold text-slate-400">Records</div>
+              <div className="flex justify-between text-xs">
+                <div><div className="text-slate-500">Largest win</div><div className="text-lg font-black text-emerald-400">+{t.largest_victory || 0}</div></div>
+                <div><div className="text-slate-500">Largest defeat</div><div className="text-lg font-black text-rose-400">{t.largest_defeat || 0}</div></div>
+                <div><div className="text-slate-500">Trophies</div><div className="text-lg font-black text-amber-400">{t.tournament_wins || 0}</div></div>
+              </div>
             </Card>
           </div>
         </TabsContent>
@@ -1071,18 +1106,34 @@ const LeaderboardView = ({ onSelectTeam }) => {
   const [teams, setTeams] = useState([])
   const [scorers, setScorers] = useState([])
   const [assists, setAssists] = useState([])
+  const [defense, setDefense] = useState([])
+  const [fairplay, setFairplay] = useState([])
+  const [active, setActive] = useState([])
   const [divisions, setDivisions] = useState([])
+  const [filters, setFilters] = useState({ football_type: 'all', city: '', division: 'all' })
+
+  const loadTeams = () => {
+    const q = new URLSearchParams()
+    if (filters.football_type !== 'all') q.set('football_type', filters.football_type)
+    if (filters.city) q.set('city', filters.city)
+    if (filters.division !== 'all') q.set('division', filters.division)
+    api('/leaderboard/teams' + (q.toString() ? '?' + q.toString() : '')).then(r => setTeams(r.teams || [])).catch(()=>{})
+  }
+  useEffect(() => { loadTeams() }, [filters.football_type, filters.city, filters.division])
   useEffect(() => {
-    api('/leaderboard/teams').then(r => setTeams(r.teams)).catch(()=>{})
-    api('/leaderboard/scorers').then(r => setScorers(r.players)).catch(()=>{})
-    api('/leaderboard/assists').then(r => setAssists(r.players)).catch(()=>{})
-    api('/divisions').then(r => setDivisions(r.divisions)).catch(()=>{})
+    api('/leaderboard/scorers').then(r => setScorers(r.players || [])).catch(()=>{})
+    api('/leaderboard/assists').then(r => setAssists(r.players || [])).catch(()=>{})
+    api('/leaderboard/defense').then(r => setDefense(r.teams || [])).catch(()=>{})
+    api('/leaderboard/fairplay').then(r => setFairplay(r.teams || [])).catch(()=>{})
+    api('/leaderboard/active').then(r => setActive(r.teams || [])).catch(()=>{})
+    api('/divisions').then(r => setDivisions(r.divisions || [])).catch(()=>{})
   }, [])
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-black">Global Ranking</h1>
-        <p className="text-sm text-slate-400">Live standings across FOOTUP.</p>
+        <p className="text-sm text-slate-400">Live standings across FOOTUP. Filter by football type, city or division.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
@@ -1095,29 +1146,63 @@ const LeaderboardView = ({ onSelectTeam }) => {
         ))}
       </div>
 
+      {/* Filters */}
+      <Card className="rounded-2xl border-white/10 bg-white/[.03] p-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div>
+            <Label className="mb-1 block text-xs font-medium text-slate-400">Football type</Label>
+            <Select value={filters.football_type} onValueChange={v => setFilters({...filters, football_type: v})}>
+              <SelectTrigger className="border-white/10 bg-white/5"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="5">5v5</SelectItem>
+                <SelectItem value="7">7v7</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs font-medium text-slate-400">City</Label>
+            <Input placeholder="Any city" value={filters.city} onChange={e => setFilters({...filters, city: e.target.value})} className="border-white/10 bg-white/5" />
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs font-medium text-slate-400">Division</Label>
+            <Select value={filters.division} onValueChange={v => setFilters({...filters, division: v})}>
+              <SelectTrigger className="border-white/10 bg-white/5"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All divisions</SelectItem>
+                {[1,2,3,4,5,6,7,8,9,10].map(d => <SelectItem key={d} value={String(d)}>Division {d}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </Card>
+
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="rounded-full bg-white/5 p-1">
-          <TabsTrigger value="teams" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Top Teams</TabsTrigger>
-          <TabsTrigger value="scorers" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Top Scorers</TabsTrigger>
-          <TabsTrigger value="assists" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Top Assists</TabsTrigger>
+        <TabsList className="flex w-full flex-wrap gap-1 rounded-2xl bg-white/5 p-1 md:inline-flex md:w-auto">
+          <TabsTrigger value="teams" className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950">Teams</TabsTrigger>
+          <TabsTrigger value="scorers" className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950">Scorers</TabsTrigger>
+          <TabsTrigger value="assists" className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950">Assists</TabsTrigger>
+          <TabsTrigger value="defense" className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950">Defense</TabsTrigger>
+          <TabsTrigger value="fairplay" className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950">Fair Play</TabsTrigger>
+          <TabsTrigger value="active" className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950">Most Active</TabsTrigger>
         </TabsList>
+
         <TabsContent value="teams" className="mt-4 space-y-2">
           {teams.map((t, i) => (
             <button key={t.id} onClick={() => onSelectTeam(t.id)} className="flex w-full items-center gap-4 rounded-2xl border border-white/10 bg-white/[.03] p-4 text-left transition hover:bg-white/[.06]">
-              <div className={'grid h-10 w-10 place-items-center rounded-xl font-black ' + (i < 3 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-slate-950' : 'bg-white/5 text-slate-300')}>
-                {i + 1}
-              </div>
+              <div className={'grid h-10 w-10 place-items-center rounded-xl font-black ' + (i < 3 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-slate-950' : 'bg-white/5 text-slate-300')}>{i + 1}</div>
               <div className="grid h-11 w-11 place-items-center rounded-xl font-bold text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
               <div className="flex-1">
-                <div className="font-bold">{t.name}</div>
-                <div className="text-xs text-slate-400">{t.city} · {t.wins}W {t.draws}D {t.losses}L</div>
+                <div className="font-bold flex items-center gap-1.5">{t.name}{t.plan === 'pro' && <Gem className="h-3 w-3 text-amber-400" />}</div>
+                <div className="text-xs text-slate-400">{t.city} · {t.wins}W {t.draws}D {t.losses}L · OVR {t.reputation?.overall || '—'}</div>
               </div>
               <Badge className={'bg-gradient-to-r text-white ' + DIVISION_COLORS[t.division.division]}>D{t.division.division}</Badge>
-              <div className="w-16 text-right text-lg font-black">{t.rating}</div>
+              <div className="w-16 text-right text-lg font-black text-emerald-400">{t.rating}</div>
             </button>
           ))}
-          {teams.length === 0 && <EmptyState icon={Trophy} title="No teams yet" />}
+          {teams.length === 0 && <EmptyState icon={Trophy} title="No teams match your filters" desc="Try adjusting football type, city or division." />}
         </TabsContent>
+
         <TabsContent value="scorers" className="mt-4 space-y-2">
           {scorers.map((p, i) => (
             <Card key={p.id} className="flex items-center gap-4 rounded-2xl border-white/10 bg-white/[.03] p-4">
@@ -1130,8 +1215,9 @@ const LeaderboardView = ({ onSelectTeam }) => {
               <div className="text-right"><div className="text-2xl font-black text-emerald-400">{p.goals}</div><div className="text-xs text-slate-400">goals</div></div>
             </Card>
           ))}
-          {scorers.length === 0 && <EmptyState icon={Target} title="No goals yet" />}
+          {scorers.length === 0 && <EmptyState icon={Target} title="No goals yet" desc="Goals from confirmed matches will appear here." />}
         </TabsContent>
+
         <TabsContent value="assists" className="mt-4 space-y-2">
           {assists.map((p, i) => (
             <Card key={p.id} className="flex items-center gap-4 rounded-2xl border-white/10 bg-white/[.03] p-4">
@@ -1145,6 +1231,51 @@ const LeaderboardView = ({ onSelectTeam }) => {
             </Card>
           ))}
           {assists.length === 0 && <EmptyState icon={Zap} title="No assists yet" />}
+        </TabsContent>
+
+        <TabsContent value="defense" className="mt-4 space-y-2">
+          {defense.map((t, i) => (
+            <button key={t.id} onClick={() => onSelectTeam(t.id)} className="flex w-full items-center gap-4 rounded-2xl border border-white/10 bg-white/[.03] p-4 text-left hover:bg-white/[.06]">
+              <div className="w-8 text-center font-black text-slate-400">{i+1}</div>
+              <div className="grid h-10 w-10 place-items-center rounded-xl font-bold text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
+              <div className="flex-1">
+                <div className="font-bold">{t.name}</div>
+                <div className="text-xs text-slate-400">{t.city} · {t.matches_played} matches</div>
+              </div>
+              <div className="text-right"><div className="text-2xl font-black text-sky-400">{t.avg_ga.toFixed(2)}</div><div className="text-xs text-slate-400">GA/match</div></div>
+            </button>
+          ))}
+          {defense.length === 0 && <EmptyState icon={Shield} title="No defensive records yet" />}
+        </TabsContent>
+
+        <TabsContent value="fairplay" className="mt-4 space-y-2">
+          {fairplay.map((t, i) => (
+            <button key={t.id} onClick={() => onSelectTeam(t.id)} className="flex w-full items-center gap-4 rounded-2xl border border-white/10 bg-white/[.03] p-4 text-left hover:bg-white/[.06]">
+              <div className="w-8 text-center font-black text-slate-400">{i+1}</div>
+              <div className="grid h-10 w-10 place-items-center rounded-xl font-bold text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
+              <div className="flex-1">
+                <div className="font-bold">{t.name}</div>
+                <div className="text-xs text-slate-400">{t.total_yellows}Y · {t.total_reds}R · {t.matches_played} matches</div>
+              </div>
+              <div className="text-right"><div className="text-2xl font-black text-emerald-400">{t.cards_per_match.toFixed(2)}</div><div className="text-xs text-slate-400">cards/match</div></div>
+            </button>
+          ))}
+          {fairplay.length === 0 && <EmptyState icon={ShieldCheck} title="No fair play records yet" />}
+        </TabsContent>
+
+        <TabsContent value="active" className="mt-4 space-y-2">
+          {active.map((t, i) => (
+            <button key={t.id} onClick={() => onSelectTeam(t.id)} className="flex w-full items-center gap-4 rounded-2xl border border-white/10 bg-white/[.03] p-4 text-left hover:bg-white/[.06]">
+              <div className="w-8 text-center font-black text-slate-400">{i+1}</div>
+              <div className="grid h-10 w-10 place-items-center rounded-xl font-bold text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
+              <div className="flex-1">
+                <div className="font-bold">{t.name}</div>
+                <div className="text-xs text-slate-400">{t.city} · D{t.division.division}</div>
+              </div>
+              <div className="text-right"><div className="text-2xl font-black text-fuchsia-400">{t.matches_played || 0}</div><div className="text-xs text-slate-400">matches</div></div>
+            </button>
+          ))}
+          {active.length === 0 && <EmptyState icon={Flag} title="No matches played yet" />}
         </TabsContent>
       </Tabs>
     </div>
@@ -1859,6 +1990,48 @@ const TeamAchievementsTab = ({ team }) => {
         </motion.div>
       ))}
     </div>
+  )
+}
+
+// -------- REPUTATION CARD (EA FC-style) --------
+const ratingColor = (n) => n >= 85 ? 'text-emerald-300' : n >= 75 ? 'text-lime-300' : n >= 65 ? 'text-amber-300' : n >= 55 ? 'text-orange-300' : 'text-slate-300'
+const ratingBg = (n) => n >= 85 ? 'from-emerald-500/30 to-cyan-500/10' : n >= 75 ? 'from-lime-500/25 to-emerald-500/10' : n >= 65 ? 'from-amber-500/25 to-yellow-500/10' : n >= 55 ? 'from-orange-500/25 to-red-500/10' : 'from-slate-500/20 to-slate-800/10'
+
+const ReputationCard = ({ team }) => {
+  if (!team?.reputation) return null
+  const r = team.reputation
+  const rows = [
+    { l: 'ATT', v: r.attack, i: Target },
+    { l: 'DEF', v: r.defense, i: Shield },
+    { l: 'DIS', v: r.discipline, i: ShieldCheck },
+    { l: 'ACT', v: r.activity, i: Zap },
+    { l: 'EXP', v: r.experience, i: Star },
+  ]
+  return (
+    <Card className={'relative overflow-hidden rounded-3xl border-white/10 bg-gradient-to-br ' + ratingBg(r.overall) + ' p-5 backdrop-blur'}>
+      <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-white/5 blur-3xl" />
+      <div className="relative flex items-center gap-5">
+        <div className="grid h-24 w-20 shrink-0 place-items-center rounded-2xl border-2 border-white/20 bg-gradient-to-br from-white/10 to-black/40 shadow-2xl">
+          <div className={'text-4xl font-black leading-none ' + ratingColor(r.overall)}>{r.overall}</div>
+          <div className="mt-1 text-[8px] font-bold uppercase tracking-widest text-slate-300">Overall</div>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center gap-2">
+            <div className="text-xs font-bold uppercase tracking-widest text-emerald-300">Team Reputation</div>
+            <div className="text-[10px] text-slate-500">EA FC-style rating · updates every match</div>
+          </div>
+          <div className="grid grid-cols-5 gap-1.5">
+            {rows.map((row) => (
+              <div key={row.l} className="rounded-xl bg-black/30 p-2 text-center">
+                <row.i className={'mx-auto mb-0.5 h-3.5 w-3.5 ' + ratingColor(row.v)} />
+                <div className={'text-lg font-black leading-none ' + ratingColor(row.v)}>{row.v}</div>
+                <div className="mt-0.5 text-[9px] font-bold text-slate-400">{row.l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Card>
   )
 }
 
