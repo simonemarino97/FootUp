@@ -59,7 +59,7 @@ const divisionOf = (rating) => {
 export default function App() {
   const [user, setUser] = useState(null)
   const [team, setTeam] = useState(null)
-  const [view, setView] = useState('feed')
+  const [view, setView] = useState('home') // home | feed | myteam | challenges | leaderboard | matches | tournaments | pricing | admin | referrals
   const [authOpen, setAuthOpen] = useState(false)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [legalPage, setLegalPage] = useState(null)
@@ -106,6 +106,8 @@ export default function App() {
       <main className="mx-auto max-w-6xl px-4 pb-24 pt-6 md:pb-8">
         {selectedTeamId ? (
           <TeamPage teamId={selectedTeamId} onBack={() => setSelectedTeamId(null)} me={user} myTeam={team} onFollowChanged={refresh} onUpgrade={() => setUpgradeOpen(true)} />
+        ) : view === 'home' ? (
+          <HomeDashboard user={user} team={team} onSelectTeam={setSelectedTeamId} onGoto={setView} onGoCreate={() => setView('myteam')} />
         ) : view === 'feed' ? (
           <FeedView user={user} team={team} onSelectTeam={setSelectedTeamId} onGoCreate={() => setView('myteam')} />
         ) : view === 'myteam' ? (
@@ -116,6 +118,8 @@ export default function App() {
           <MatchesView team={team} onSelectTeam={setSelectedTeamId} />
         ) : view === 'leaderboard' ? (
           <LeaderboardView onSelectTeam={setSelectedTeamId} />
+        ) : view === 'tournaments' ? (
+          <TournamentsView />
         ) : view === 'pricing' ? (
           <PricingView user={user} onUpgrade={() => setUpgradeOpen(true)} onRefresh={refresh} />
         ) : view === 'referrals' ? (
@@ -320,12 +324,14 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
         </button>
         <nav className="hidden items-center gap-1 md:flex">
           {[
-            { id:'feed', l:'Feed', i:Home },
+            { id:'home', l:'Home', i:Home },
             { id:'challenges', l:'Challenges', i:Swords },
+            { id:'tournaments', l:'Tournaments', i:Trophy },
+            { id:'feed', l:'Feed', i:Sparkles },
+            { id:'leaderboard', l:'Ranking', i:BarChart3 },
             { id:'matches', l:'Matches', i:Flag },
-            { id:'leaderboard', l:'Ranking', i:Trophy },
-            { id:'myteam', l:'My Team', i:Shield },
-            { id:'pricing', l:'Pricing', i:Gem },
+            { id:'myteam', l:'Profile', i:Shield },
+            { id:'pricing', l:'PRO', i:Gem },
           ].map(t => (
             <button key={t.id} onClick={() => setView(t.id)} className={'flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ' + (view === t.id ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white')}>
               <t.i className="h-4 w-4" /> {t.l}
@@ -340,7 +346,7 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
         <div className="flex items-center gap-2">
           {!isPro && (
             <Button onClick={onUpgrade} size="sm" className="hidden rounded-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/20 hover:opacity-90 md:inline-flex">
-              <Gem className="mr-1.5 h-3.5 w-3.5" /> Get Season Pass
+              <Gem className="mr-1.5 h-3.5 w-3.5" /> PRO soon
             </Button>
           )}
           {isPro && <ProBadge small />}
@@ -379,13 +385,17 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
 }
 
 const BottomNav = ({ view, setView, isPro, isAdmin }) => (
-  <nav className="fixed bottom-3 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-slate-950/80 p-1.5 backdrop-blur-xl md:hidden">
+  <nav className="fixed bottom-3 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-slate-950/80 p-1.5 shadow-2xl shadow-black/50 backdrop-blur-xl md:hidden">
     {[
-      { id:'feed', i:Home }, { id:'challenges', i:Swords }, { id:'matches', i:Flag },
-      { id:'leaderboard', i:Trophy }, { id:'myteam', i:Shield }, { id:'pricing', i:Gem },
+      { id:'home', i:Home, l:'Home' },
+      { id:'challenges', i:Swords, l:'Play' },
+      { id:'tournaments', i:Trophy, l:'Cups' },
+      { id:'feed', i:Sparkles, l:'Feed' },
+      { id:'myteam', i:Shield, l:'Team' },
     ].map(t => (
-      <button key={t.id} onClick={() => setView(t.id)} className={'grid h-11 w-11 place-items-center rounded-xl transition ' + (view === t.id ? 'bg-gradient-to-br from-emerald-500 to-cyan-500 text-slate-950' : 'text-slate-400')}>
+      <button key={t.id} onClick={() => setView(t.id)} className={'group flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl transition ' + (view === t.id ? 'bg-gradient-to-br from-emerald-500 to-cyan-500 text-slate-950' : 'text-slate-400')}>
         <t.i className="h-5 w-5" />
+        <span className="text-[9px] font-semibold uppercase tracking-wider">{t.l}</span>
       </button>
     ))}
   </nav>
@@ -684,7 +694,13 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
                 {t.is_founder && <FounderBadge />}
               </div>
               <h1 className="text-3xl font-black text-white md:text-4xl">{t.name}</h1>
-              <div className="mt-1 text-sm text-slate-300"><MapPin className="mr-1 inline h-3 w-3" />{t.city}{t.province ? ', ' + t.province : ''} · Est. {t.founded_year}</div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300">
+                <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{t.city}{t.province ? ', ' + t.province : ''}</span>
+                <span>·</span>
+                <span>Est. {t.founded_year}</span>
+                {t.captain_name && (<><span>·</span><span className="inline-flex items-center gap-1"><Crown className="h-3 w-3 text-amber-400" /> Capt. {t.captain_name}</span></>)}
+                {t.facility && (<><span>·</span><span className="inline-flex items-center gap-1"><Shield className="h-3 w-3" /> {t.facility}</span></>)}
+              </div>
             </div>
           </div>
           {!isMine && me && (
@@ -711,12 +727,14 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="rounded-full bg-white/5 p-1">
-          <TabsTrigger value="overview" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Overview</TabsTrigger>
-          <TabsTrigger value="roster" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Roster</TabsTrigger>
-          <TabsTrigger value="posts" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Posts</TabsTrigger>
-          <TabsTrigger value="history" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">Last 10</TabsTrigger>
-          <TabsTrigger value="advanced" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-slate-950">
+        <TabsList className="flex w-full flex-wrap gap-1 rounded-2xl bg-white/5 p-1 md:inline-flex md:w-auto">
+          <TabsTrigger value="overview" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Overview</TabsTrigger>
+          <TabsTrigger value="roster" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Roster</TabsTrigger>
+          <TabsTrigger value="posts" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Posts</TabsTrigger>
+          <TabsTrigger value="gallery" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Gallery</TabsTrigger>
+          <TabsTrigger value="history" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Matches</TabsTrigger>
+          <TabsTrigger value="achievements" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Trophies</TabsTrigger>
+          <TabsTrigger value="advanced" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">
             <Gem className="mr-1 h-3 w-3 text-amber-400" /> Advanced
           </TabsTrigger>
         </TabsList>
@@ -768,6 +786,14 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
         <TabsContent value="advanced" className="mt-4">
           <AdvancedStatsTab teamId={t.id} isPro={t.plan === 'pro'} onUpgrade={onUpgrade} canUpgrade={isMine} />
         </TabsContent>
+
+        <TabsContent value="gallery" className="mt-4">
+          <TeamGalleryTab posts={data.posts} coverUrl={t.cover_url} logoUrl={t.logo_url} />
+        </TabsContent>
+
+        <TabsContent value="achievements" className="mt-4">
+          <TeamAchievementsTab team={t} />
+        </TabsContent>
       </Tabs>
     </div>
   )
@@ -782,18 +808,34 @@ const StatCard = ({ icon: I, label, value, accent }) => (
 )
 
 const PlayerCard = ({ p }) => (
-  <Card className="flex items-center gap-3 rounded-2xl border-white/10 bg-white/[.03] p-4">
-    <Avatar className="h-12 w-12 border border-white/10">
-      <AvatarImage src={p.photo_url} />
-      <AvatarFallback className="bg-emerald-500/20 text-emerald-300 font-bold">{(p.first_name || '?')[0]}</AvatarFallback>
-    </Avatar>
-    <div className="min-w-0 flex-1">
-      <div className="flex items-center gap-1 truncate text-sm font-bold">{p.first_name} {p.last_name}{p.is_captain && <Crown className="h-3 w-3 text-amber-400" />}</div>
-      <div className="text-xs text-slate-400">#{p.shirt_number || '-'} · {p.position} · {p.foot}</div>
+  <Card className="group relative flex items-center gap-3 overflow-hidden rounded-2xl border-white/10 bg-gradient-to-br from-white/[.05] to-white/[.02] p-4 backdrop-blur transition hover:border-emerald-500/30 hover:bg-white/[.06]">
+    <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-emerald-500/5 blur-2xl transition group-hover:bg-emerald-500/15" />
+    <div className="relative">
+      <Avatar className="h-14 w-14 border-2 border-white/10">
+        <AvatarImage src={p.photo_url} />
+        <AvatarFallback className="bg-gradient-to-br from-emerald-500/40 to-cyan-500/40 text-white font-black">{(p.first_name || '?')[0]}</AvatarFallback>
+      </Avatar>
+      {p.shirt_number && (
+        <div className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full bg-slate-950 border border-white/20 text-[10px] font-black text-emerald-300">
+          {p.shirt_number}
+        </div>
+      )}
     </div>
-    <div className="text-right text-xs text-slate-400">
-      <div><span className="font-bold text-white">{p.goals}</span> G</div>
-      <div><span className="font-bold text-white">{p.assists}</span> A</div>
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-1.5 truncate text-sm font-black text-white">
+        {p.first_name} {p.last_name}
+        {p.is_captain && <div className="grid h-4 w-4 place-items-center rounded bg-amber-400/20"><Crown className="h-2.5 w-2.5 text-amber-300" /></div>}
+      </div>
+      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400">
+        <span className="inline-flex items-center rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold text-slate-200">{p.position}</span>
+        <span>·</span>
+        <span className="capitalize">{p.foot}</span>
+      </div>
+      <div className="mt-2 flex items-center gap-3 text-xs">
+        <div><span className="font-black text-white">{p.matches || 0}</span> <span className="text-slate-500">M</span></div>
+        <div><span className="font-black text-emerald-400">{p.goals || 0}</span> <span className="text-slate-500">G</span></div>
+        <div><span className="font-black text-cyan-400">{p.assists || 0}</span> <span className="text-slate-500">A</span></div>
+      </div>
     </div>
   </Card>
 )
@@ -1142,11 +1184,16 @@ const SkeletonPost = () => (
   </div>
 )
 const EmptyState = ({ icon: I, title, desc, action }) => (
-  <div className="rounded-3xl border border-dashed border-white/10 p-10 text-center">
-    <I className="mx-auto mb-3 h-8 w-8 text-slate-500" />
-    <div className="text-lg font-bold">{title}</div>
-    {desc && <div className="text-sm text-slate-400">{desc}</div>}
-    {action && <Button onClick={action.on} className="mt-4 rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90">{action.label}</Button>}
+  <div className="relative overflow-hidden rounded-3xl border border-dashed border-white/10 bg-gradient-to-br from-white/[.03] to-transparent p-12 text-center">
+    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(16,185,129,.08),transparent_60%)]" />
+    <div className="relative">
+      <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/10 border border-white/10">
+        <I className="h-7 w-7 text-emerald-300" />
+      </div>
+      <div className="mb-1 text-xl font-black">{title}</div>
+      {desc && <div className="mx-auto max-w-md text-sm text-slate-400">{desc}</div>}
+      {action && <Button onClick={action.on} className="mt-5 rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90">{action.label}</Button>}
+    </div>
   </div>
 )
 // -------- PRICING VIEW --------
@@ -1259,10 +1306,10 @@ const PricingView = ({ user, onUpgrade, onRefresh }) => {
               </div>
             ) : (
               <Button onClick={onUpgrade} className="mt-6 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/30 hover:opacity-90">
-                <Rocket className="mr-2 h-4 w-4" /> Activate Team Season Pass
+                <Bell className="mr-2 h-4 w-4" /> Join the waitlist
               </Button>
             )}
-            <div className="mt-3 text-center text-[10px] text-amber-200/70">Offered by FOOTUP ASD · Amateur Sports Association</div>
+            <div className="mt-3 text-center text-[10px] text-amber-200/70">Offered by FOOTUP ASD · Amateur Sports Association · Launching Q1</div>
           </Card>
         </motion.div>
       </div>
@@ -1286,62 +1333,37 @@ const PricingView = ({ user, onUpgrade, onRefresh }) => {
 
 // -------- UPGRADE DIALOG (Stripe placeholder) --------
 const UpgradeDialog = ({ open, onOpenChange, onSuccess }) => {
-  const [busy, setBusy] = useState(false)
-  const [step, setStep] = useState('confirm') // confirm | processing | done
-  const upgrade = async () => {
-    setStep('processing'); setBusy(true)
-    try {
-      // TODO: replace with Stripe Checkout redirect
-      await new Promise(r => setTimeout(r, 1200))
-      await api('/subscription/upgrade', { method:'POST', body: JSON.stringify({ provider: 'placeholder' }) })
-      setStep('done')
-      setTimeout(() => { onSuccess?.(); toast.success('Welcome to FOOTUP PRO! 🏆'); setStep('confirm') }, 900)
-    } catch (e) { toast.error(e.message); setStep('confirm') } finally { setBusy(false) }
+  const [email, setEmail] = useState('')
+  const [joined, setJoined] = useState(false)
+  const notify = () => {
+    setJoined(true)
+    toast.success("You're on the waitlist! We'll ping you at launch.")
+    setTimeout(() => { setJoined(false); onOpenChange(false) }, 1600)
   }
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!busy) onOpenChange(o) }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="overflow-hidden border-amber-500/40 bg-gradient-to-br from-slate-950 via-slate-950 to-amber-950/20 text-white sm:max-w-md">
         <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-amber-500/20 blur-3xl" />
-        {step === 'confirm' && (
-          <>
-            <DialogHeader>
-              <div className="mx-auto mb-2 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 shadow-2xl shadow-amber-500/40">
-                <Gem className="h-7 w-7 text-slate-950" />
-              </div>
-              <div className="text-center text-xs uppercase tracking-widest text-amber-200/80">FOOTUP PRO</div>
-              <DialogTitle className="text-center text-2xl">Activate your Team Season Pass</DialogTitle>
-            </DialogHeader>
-            <div className="mt-2 text-center">
-              <div className="text-5xl font-black">€9.99<span className="text-lg font-normal text-slate-400">/season</span></div>
-              <div className="text-xs text-slate-500">Per team · Runs for one full season · Renews automatically</div>
-            </div>
-            <div className="mt-4 space-y-2 rounded-2xl bg-white/5 p-4">
-              {['Advanced stats & season charts', 'Priority in team searches', 'Season Pass badge on your profile', 'No ads · Early access to new features'].map(f => (
-                <div key={f} className="flex items-center gap-2 text-sm"><Check className="h-4 w-4 text-amber-300" /> {f}</div>
-              ))}
-            </div>
-            <Button onClick={upgrade} className="mt-4 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 hover:opacity-90">
-              <CreditCard className="mr-2 h-4 w-4" /> Continue to payment
-            </Button>
-            <div className="text-center text-[10px] text-slate-500">A digital service offered by FOOTUP ASD — amateur sports association. Stripe integration coming soon; this placeholder activates the Season Pass instantly.</div>
-          </>
-        )}
-        {step === 'processing' && (
-          <div className="py-8 text-center">
-            <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-amber-500/30 border-t-amber-400" />
-            <div className="text-lg font-bold">Activating your Season Pass…</div>
-            <div className="text-xs text-slate-400">Setting up your team benefits</div>
+        <DialogHeader>
+          <div className="mx-auto mb-2 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 shadow-2xl shadow-amber-500/40">
+            <Gem className="h-7 w-7 text-slate-950" />
           </div>
-        )}
-        {step === 'done' && (
-          <div className="py-8 text-center">
-            <motion.div initial={{scale:0}} animate={{scale:1}} className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500">
-              <Check className="h-8 w-8 text-slate-950" />
-            </motion.div>
-            <div className="text-2xl font-black">Season Pass activated! 🏆</div>
-            <div className="text-sm text-slate-300">Welcome to FOOTUP PRO.</div>
-          </div>
-        )}
+          <div className="text-center text-xs uppercase tracking-widest text-amber-200/80">FOOTUP PRO</div>
+          <DialogTitle className="text-center text-2xl">Team Season Pass — Coming soon</DialogTitle>
+        </DialogHeader>
+        <div className="mt-1 text-center">
+          <Badge className="rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/30">Launching Q1</Badge>
+          <div className="mt-3 text-sm text-slate-300">Advanced stats, priority in search, PRO badge, no ads. The Team Season Pass will unlock the full FOOTUP experience for competitive teams.</div>
+        </div>
+        <div className="mt-4 space-y-2 rounded-2xl bg-white/5 p-4">
+          {['Advanced stats & charts', 'Priority in search', 'PRO badge on profile', 'No ads · Early access'].map(f => (
+            <div key={f} className="flex items-center gap-2 text-sm"><Check className="h-4 w-4 text-amber-300" /> {f}</div>
+          ))}
+        </div>
+        <Button onClick={notify} disabled={joined} className="mt-4 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 hover:opacity-90">
+          {joined ? <><Check className="mr-2 h-4 w-4" /> You're on the list</> : <><Bell className="mr-2 h-4 w-4" /> Notify me at launch</>}
+        </Button>
+        <div className="text-center text-[10px] text-slate-500">A digital service by FOOTUP ASD — Amateur Sports Association. Payments open at launch.</div>
       </DialogContent>
     </Dialog>
   )
@@ -1559,6 +1581,282 @@ const GoalTrendChart = ({ data }) => {
           </div>
           <div className="text-[10px] text-slate-500">#{d.index}</div>
         </div>
+      ))}
+    </div>
+  )
+}
+
+// -------- HOME DASHBOARD --------
+const HomeDashboard = ({ user, team, onSelectTeam, onGoto, onGoCreate }) => {
+  const [state, setState] = useState({ posts: [], challenges: [], leaderboard: [], matches: [] })
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    Promise.all([
+      api('/feed').catch(() => ({ posts: [] })),
+      api('/challenges').catch(() => ({ challenges: [] })),
+      api('/leaderboard/teams').catch(() => ({ teams: [] })),
+      team ? api('/matches').catch(() => ({ matches: [] })) : Promise.resolve({ matches: [] }),
+    ]).then(([f, c, l, m]) => {
+      setState({ posts: f.posts || [], challenges: (c.challenges || []).filter(x => x.status === 'open'), leaderboard: l.teams || [], matches: m.matches || [] })
+      setLoading(false)
+    })
+  }, [team])
+
+  const upcomingMatches = state.matches.filter(m => m.status !== 'confirmed').slice(0, 3)
+  const topTeams = state.leaderboard.slice(0, 5)
+  const trendingTeams = state.leaderboard.slice(0, 6)
+  const openChallenges = state.challenges.slice(0, 4)
+  const feedPosts = state.posts.slice(0, 3)
+
+  return (
+    <div className="space-y-6">
+      {/* Welcome hero */}
+      <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-500/20 via-cyan-500/10 to-transparent p-6 backdrop-blur">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-emerald-500/20 blur-3xl" />
+        <div className="pointer-events-none absolute -left-10 -bottom-10 h-40 w-40 rounded-full bg-cyan-500/20 blur-3xl" />
+        <div className="relative flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-widest text-emerald-300">{new Date().toLocaleDateString(undefined, { weekday: 'long' })}</div>
+            <h1 className="mt-1 text-3xl font-black md:text-4xl">Welcome back, {user.name.split(' ')[0]}</h1>
+            {team ? (
+              <div className="mt-1 text-sm text-slate-300">Captain of <span className="font-bold text-white">{team.name}</span> · Rating {team.rating}</div>
+            ) : (
+              <div className="mt-1 text-sm text-slate-300">You don't have a team yet. Create one to start competing.</div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {!team && <Button onClick={onGoCreate} className="rounded-full bg-white text-slate-950 hover:bg-slate-100"><Plus className="mr-1.5 h-4 w-4" /> Create team</Button>}
+            <Button onClick={() => onGoto('challenges')} className="rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90"><Swords className="mr-1.5 h-4 w-4" /> Find match</Button>
+          </div>
+        </div>
+      </div>
+
+      {loading ? <SkeletonPost /> : (
+        <div className="grid gap-6 md:grid-cols-3">
+          {/* LEFT COLUMN */}
+          <div className="space-y-6 md:col-span-2">
+            {/* Upcoming Matches */}
+            <SectionCard icon={Flag} title="Upcoming matches" cta={team ? { l: 'All', on: () => onGoto('matches') } : null}>
+              {upcomingMatches.length === 0 ? (
+                <MiniEmpty icon={Flag} text={team ? "No upcoming matches" : "Create a team to accept challenges"} />
+              ) : (
+                <div className="space-y-2">
+                  {upcomingMatches.map(m => (
+                    <button key={m.id} onClick={() => onGoto('matches')} className="flex w-full items-center justify-between rounded-xl bg-white/5 p-3 text-left transition hover:bg-white/[.08]">
+                      <div>
+                        <div className="text-sm font-bold">{m.home_team_name} <span className="text-slate-500">vs</span> {m.away_team_name}</div>
+                        <div className="text-xs text-slate-400">{m.date || 'TBD'} {m.time && `· ${m.time}`} · {m.facility || m.city}</div>
+                      </div>
+                      <Badge className={'capitalize ' + (m.status === 'disputed' ? 'bg-rose-500/20 text-rose-300' : m.status === 'pending' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-500/20 text-slate-300')}>{m.status}</Badge>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+
+            {/* Open Challenges */}
+            <SectionCard icon={Swords} title="Open challenges" cta={{ l: 'All', on: () => onGoto('challenges') }}>
+              {openChallenges.length === 0 ? (
+                <MiniEmpty icon={Swords} text="No open challenges yet." />
+              ) : (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {openChallenges.map(c => (
+                    <div key={c.id} className="rounded-xl bg-white/5 p-3">
+                      <div className="flex items-center gap-2">
+                        <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-emerald-500/40 to-cyan-500/40 text-xs font-bold text-white">{c.team_name[0]}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-bold">{c.team_name}</div>
+                          <div className="text-[10px] text-slate-400">{c.city} · Rating {c.team_rating}</div>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-400"><Calendar className="mr-1 inline h-3 w-3" /> {c.date || 'Any day'} · {c.football_type === 'both' ? '5/7' : c.football_type}v{c.football_type === 'both' ? '5/7' : c.football_type}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+
+            {/* Community Feed */}
+            <SectionCard icon={Sparkles} title="Community feed" cta={{ l: 'View all', on: () => onGoto('feed') }}>
+              {feedPosts.length === 0 ? (
+                <MiniEmpty icon={Sparkles} text="No posts yet. Be the first to share." />
+              ) : (
+                <div className="space-y-3">
+                  {feedPosts.map(p => (
+                    <button key={p.id} onClick={() => onSelectTeam(p.team_id)} className="flex w-full items-start gap-3 rounded-xl bg-white/5 p-3 text-left transition hover:bg-white/[.08]">
+                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-emerald-500/40 to-cyan-500/40 text-xs font-bold text-white">{p.team_name[0]}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-sm font-bold">{p.team_name}<span className="text-[10px] font-normal text-slate-500">{fmtAgo(p.created_at)}</span></div>
+                        {p.content && <div className="mt-1 line-clamp-2 text-xs text-slate-300">{p.content}</div>}
+                        <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-500">
+                          <span className="inline-flex items-center gap-1"><Heart className="h-3 w-3" /> {(p.likes || []).length}</span>
+                          <span className="inline-flex items-center gap-1"><MessageCircle className="h-3 w-3" /> {(p.comments || []).length}</span>
+                        </div>
+                      </div>
+                      {p.media_url && <img src={p.media_url} className="h-14 w-14 shrink-0 rounded-lg object-cover" alt="" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+          </div>
+
+          {/* RIGHT COLUMN */}
+          <div className="space-y-6">
+            {/* Division Ranking */}
+            <SectionCard icon={Trophy} title="Division ranking" cta={{ l: 'Full', on: () => onGoto('leaderboard') }}>
+              {topTeams.length === 0 ? <MiniEmpty icon={Trophy} text="No teams ranked yet." /> : (
+                <div className="space-y-1.5">
+                  {topTeams.map((t, i) => (
+                    <button key={t.id} onClick={() => onSelectTeam(t.id)} className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition hover:bg-white/5">
+                      <div className={'grid h-7 w-7 place-items-center rounded-lg text-[11px] font-black ' + (i === 0 ? 'bg-gradient-to-br from-amber-300 to-yellow-500 text-slate-950' : i < 3 ? 'bg-white/10 text-white' : 'bg-white/5 text-slate-400')}>{i+1}</div>
+                      <div className="grid h-8 w-8 place-items-center rounded-lg text-xs font-bold text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-bold">{t.name}</div>
+                        <div className="text-[10px] text-slate-500">D{t.division.division} · {t.wins}W {t.draws}D {t.losses}L</div>
+                      </div>
+                      <div className="text-xs font-black text-emerald-400">{t.rating}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+
+            {/* Latest Notifications (placeholder) */}
+            <SectionCard icon={Bell} title="Latest activity">
+              <MiniEmpty icon={Bell} text="Realtime notifications coming soon." />
+            </SectionCard>
+
+            {/* Featured Tournaments (placeholder) */}
+            <SectionCard icon={Trophy} title="Featured tournaments" cta={{ l: 'Browse', on: () => onGoto('tournaments') }}>
+              <MiniEmpty icon={Trophy} text="First official FOOTUP ASD tournaments launching soon." />
+            </SectionCard>
+
+            {/* Trending Teams */}
+            <SectionCard icon={TrendingUp} title="Trending teams">
+              {trendingTeams.length === 0 ? <MiniEmpty icon={TrendingUp} text="No teams yet." /> : (
+                <div className="flex flex-wrap gap-1.5">
+                  {trendingTeams.map(t => (
+                    <button key={t.id} onClick={() => onSelectTeam(t.id)} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/10">
+                      <div className="grid h-4 w-4 place-items-center rounded text-[9px] text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const SectionCard = ({ icon: I, title, cta, children }) => (
+  <Card className="overflow-hidden rounded-2xl border-white/10 bg-white/[.03] p-5 backdrop-blur">
+    <div className="mb-3 flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <div className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/15 text-emerald-300"><I className="h-3.5 w-3.5" /></div>
+        <h3 className="text-sm font-black uppercase tracking-wide">{title}</h3>
+      </div>
+      {cta && <button onClick={cta.on} className="inline-flex items-center gap-0.5 text-xs font-bold text-emerald-300 hover:text-emerald-200">{cta.l} <ChevronRight className="h-3 w-3" /></button>}
+    </div>
+    {children}
+  </Card>
+)
+const MiniEmpty = ({ icon: I, text }) => (
+  <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-white/10 py-6 text-center">
+    <I className="h-5 w-5 text-slate-500" />
+    <div className="text-xs text-slate-500">{text}</div>
+  </div>
+)
+
+// -------- TOURNAMENTS --------
+const TournamentsView = () => (
+  <div className="space-y-6">
+    <div>
+      <div className="flex items-center gap-2"><Trophy className="h-6 w-6 text-amber-400" /><h1 className="text-3xl font-black">Tournaments</h1></div>
+      <p className="text-sm text-slate-400">Official FOOTUP ASD tournaments and community cups.</p>
+    </div>
+    <Card className="relative overflow-hidden rounded-3xl border-amber-500/30 bg-gradient-to-br from-amber-500/15 via-orange-500/10 to-transparent p-10 text-center backdrop-blur">
+      <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-amber-500/20 blur-3xl" />
+      <div className="pointer-events-none absolute -left-10 -bottom-10 h-40 w-40 rounded-full bg-rose-500/20 blur-3xl" />
+      <div className="relative">
+        <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 shadow-2xl shadow-amber-500/40">
+          <Trophy className="h-8 w-8 text-slate-950" />
+        </div>
+        <Badge className="mb-3 rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/30">Coming soon</Badge>
+        <h2 className="text-3xl font-black md:text-4xl">Tournaments launching Q1</h2>
+        <p className="mx-auto mt-3 max-w-lg text-slate-300">Compete in knockout cups and league tournaments organized by FOOTUP ASD. Reserve your spot — early access opens with the first official season.</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {['Knockout Cup', 'City League', 'Championship'].map(t => (
+            <Badge key={t} variant="outline" className="rounded-full border-white/20 bg-white/5 px-3 py-1 text-white">{t}</Badge>
+          ))}
+        </div>
+      </div>
+    </Card>
+
+    <div className="grid gap-4 md:grid-cols-3">
+      {[
+        { i: Award, t: 'Knockout format', d: 'Single or double elimination brackets. Winner takes the cup.' },
+        { i: BarChart3, t: 'League format', d: 'Round-robin standings with points, GD and top scorers.' },
+        { i: Crown, t: 'Official titles', d: 'Winners earn permanent badges and ranking bonuses.' },
+      ].map((f, i) => (
+        <Card key={i} className="rounded-2xl border-white/10 bg-white/[.03] p-5 backdrop-blur">
+          <div className="mb-3 grid h-9 w-9 place-items-center rounded-lg bg-amber-500/15"><f.i className="h-4 w-4 text-amber-300" /></div>
+          <div className="text-lg font-black">{f.t}</div>
+          <div className="mt-1 text-sm text-slate-400">{f.d}</div>
+        </Card>
+      ))}
+    </div>
+  </div>
+)
+
+// -------- TEAM GALLERY + ACHIEVEMENTS --------
+const TeamGalleryTab = ({ posts, coverUrl, logoUrl }) => {
+  const media = [
+    ...(coverUrl ? [{ url: coverUrl, label: 'Cover' }] : []),
+    ...(logoUrl ? [{ url: logoUrl, label: 'Logo' }] : []),
+    ...posts.filter(p => p.media_url).map(p => ({ url: p.media_url, label: p.kind, id: p.id })),
+  ]
+  if (media.length === 0) return <EmptyState icon={Camera} title="Gallery is empty" desc="Photos published in team posts will appear here automatically." />
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+      {media.map((m, i) => (
+        <div key={i} className="group relative aspect-square overflow-hidden rounded-xl bg-white/5">
+          <img src={m.url} alt="" className="h-full w-full object-cover transition group-hover:scale-105" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-white">{m.label}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const TeamAchievementsTab = ({ team }) => {
+  const list = []
+  if (team.is_founder) list.push({ i: Star, l: 'Founder Team', d: 'Joined FOOTUP during its founding season', c: 'from-fuchsia-500 to-purple-600' })
+  if (team.wins >= 1) list.push({ i: Trophy, l: 'First Victory', d: 'Won your first match on FOOTUP', c: 'from-emerald-500 to-cyan-500' })
+  if (team.wins >= 10) list.push({ i: Award, l: '10 Wins Club', d: 'Achieved 10 total victories', c: 'from-amber-400 to-orange-500' })
+  if (team.wins >= 50) list.push({ i: Crown, l: '50 Wins Legend', d: 'A true FOOTUP dynasty', c: 'from-yellow-400 to-red-500' })
+  if ((team.best_streak || 0) >= 3) list.push({ i: Zap, l: 'On Fire', d: '3-match winning streak', c: 'from-orange-400 to-red-500' })
+  if ((team.best_streak || 0) >= 10) list.push({ i: Zap, l: 'Unstoppable', d: '10-match winning streak', c: 'from-rose-500 to-fuchsia-600' })
+  if ((team.goals_for || 0) >= 100) list.push({ i: Target, l: 'Century of Goals', d: '100 goals scored all-time', c: 'from-emerald-400 to-teal-500' })
+  if (team.division?.division <= 3) list.push({ i: Gem, l: 'Elite Division', d: `Currently in ${team.division.name}`, c: 'from-amber-300 to-yellow-500' })
+
+  if (list.length === 0) return <EmptyState icon={Award} title="No achievements yet" desc="Play matches and win to unlock trophies for your team." />
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+      {list.map((a, i) => (
+        <motion.div key={i} initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{delay:i*.05}}>
+          <Card className={'relative overflow-hidden rounded-2xl border-white/10 bg-gradient-to-br p-5 ' + a.c}>
+            <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/20 blur-2xl" />
+            <a.i className="mb-3 h-8 w-8 text-white drop-shadow" />
+            <div className="text-lg font-black text-white">{a.l}</div>
+            <div className="text-xs text-white/80">{a.d}</div>
+          </Card>
+        </motion.div>
       ))}
     </div>
   )

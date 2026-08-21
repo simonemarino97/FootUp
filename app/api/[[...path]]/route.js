@@ -31,13 +31,13 @@ async function handler(request, { params }) {
       if (!t) return t
       const cap = await db.collection('users').findOne({ id: t.captain_id })
       const ps = planStatus(cap)
-      return { ...t, plan: ps.plan, is_founder: ps.is_founder, pro_until: ps.pro_until }
+      return { ...t, plan: ps.plan, is_founder: ps.is_founder, pro_until: ps.pro_until, captain_name: cap?.name || null }
     }
     const enrichTeamsPlan = async (list) => {
       const ids = [...new Set(list.map(t => t.captain_id))]
       const caps = await db.collection('users').find({ id: { $in: ids } }).toArray()
-      const map = Object.fromEntries(caps.map(u => [u.id, planStatus(u)]))
-      return list.map(t => ({ ...t, plan: map[t.captain_id]?.plan || 'free', is_founder: !!map[t.captain_id]?.is_founder, pro_until: map[t.captain_id]?.pro_until || null }))
+      const map = Object.fromEntries(caps.map(u => [u.id, { ...planStatus(u), name: u.name }]))
+      return list.map(t => ({ ...t, plan: map[t.captain_id]?.plan || 'free', is_founder: !!map[t.captain_id]?.is_founder, pro_until: map[t.captain_id]?.pro_until || null, captain_name: map[t.captain_id]?.name || null }))
     }
 
     // ============ AUTH ============
