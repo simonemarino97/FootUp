@@ -141,8 +141,9 @@ export default function App() {
 // -------- Splash --------
 const SplashLoading = () => (
   <div className="grid min-h-screen place-items-center bg-black">
-    <motion.div initial={{scale:.8, opacity:0}} animate={{scale:1, opacity:1}} transition={{duration:.6}} className="text-center">
-      <img src="/logo.png" alt="FOOTUP" className="mx-auto h-24 w-24 drop-shadow-[0_0_40px_rgba(16,185,129,0.5)]" />
+    <motion.div initial={{scale:.9, opacity:0}} animate={{scale:1, opacity:1}} transition={{duration:.6}} className="text-center">
+      <img src="/logo.png" alt="FOOTUP" className="mx-auto h-20 w-auto drop-shadow-[0_0_40px_rgba(16,185,129,0.5)]" />
+      <div className="mt-3 text-[11px] font-bold uppercase tracking-[0.4em] text-emerald-400/70">Your Club · Your Legacy</div>
     </motion.div>
   </div>
 )
@@ -158,10 +159,9 @@ const Landing = ({ onGetStarted, onLegal }) => (
       </div>
       <nav className="relative z-10 flex items-center justify-between px-6 py-6 md:px-12">
         <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="FOOTUP" className="h-11 w-11 drop-shadow-[0_0_20px_rgba(16,185,129,0.4)]" />
-          <span className="text-2xl font-black tracking-tight">FOOT<span className="text-emerald-400">UP</span></span>
+          <img src="/logo.png" alt="FOOTUP" className="h-9 w-auto drop-shadow-[0_0_20px_rgba(16,185,129,0.4)]" />
         </div>
-        <Button onClick={onGetStarted} className="rounded-full bg-white/10 backdrop-blur-md border border-white/20 hover:bg-white/20">
+        <Button onClick={onGetStarted} className="rounded-full border border-white/40 bg-white/10 text-white backdrop-blur-md transition hover:bg-white hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-white/70">
           Sign in
         </Button>
       </nav>
@@ -182,7 +182,7 @@ const Landing = ({ onGetStarted, onLegal }) => (
             <Button size="lg" onClick={onGetStarted} className="rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 px-8 text-base font-bold text-slate-950 shadow-2xl shadow-emerald-500/30 hover:opacity-90">
               Create your team <ChevronRight className="ml-1 h-4 w-4" />
             </Button>
-            <Button size="lg" variant="outline" onClick={onGetStarted} className="rounded-full border-white/30 bg-white/5 backdrop-blur hover:bg-white/10 text-white">
+            <Button size="lg" variant="outline" onClick={onGetStarted} className="rounded-full border-2 border-white bg-white/5 text-white backdrop-blur transition hover:bg-white hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-white">
               Explore ranking
             </Button>
           </div>
@@ -259,8 +259,7 @@ const AuthDialog = ({ open, onOpenChange, onSuccess }) => {
       <DialogContent className="border-white/10 bg-slate-950 text-white sm:max-w-md">
         <DialogHeader>
           <div className="mb-2 flex items-center gap-2">
-            <img src="/logo.png" alt="FOOTUP" className="h-10 w-10" />
-            <span className="text-xl font-black">FOOT<span className="text-emerald-400">UP</span></span>
+            <img src="/logo.png" alt="FOOTUP" className="h-8 w-auto" />
           </div>
           <DialogTitle className="text-2xl">{mode === 'login' ? 'Welcome back, captain' : 'Create your captain account'}</DialogTitle>
         </DialogHeader>
@@ -318,9 +317,8 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
   return (
     <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/70 backdrop-blur-xl">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <button onClick={() => setView('feed')} className="flex items-center gap-2">
-          <img src="/logo.png" alt="FOOTUP" className="h-10 w-10" />
-          <span className="text-xl font-black">FOOT<span className="text-emerald-400">UP</span></span>
+        <button onClick={() => setView('home')} className="flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 rounded-lg">
+          <img src="/logo.png" alt="FOOTUP" className="h-8 w-auto" />
         </button>
         <nav className="hidden items-center gap-1 md:flex">
           {[
@@ -713,7 +711,7 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
             </div>
           </div>
           {!isMine && me && (
-            <Button onClick={follow} className={'rounded-full ' + (isFollowing ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-white text-slate-950 hover:bg-slate-100')}>
+            <Button onClick={follow} className={'rounded-full font-bold transition focus-visible:ring-2 focus-visible:ring-white ' + (isFollowing ? 'border border-white/60 bg-white/10 text-white hover:bg-white hover:text-slate-950' : 'bg-white text-slate-950 hover:bg-slate-100')}>
               {isFollowing ? 'Following' : 'Follow'}
             </Button>
           )}
@@ -1433,7 +1431,7 @@ const PricingView = ({ user, onUpgrade, onRefresh }) => {
                   <div className="text-xs text-slate-400">Season Pass renews</div>
                   <div className="font-bold text-white">{renew}</div>
                 </div>
-                <Button onClick={cancel} variant="outline" className="w-full rounded-xl border-white/20 bg-white/5 text-white hover:bg-white/10">Stop automatic renewal</Button>
+                <Button onClick={cancel} variant="outline" className="w-full rounded-xl border border-white/60 bg-white/5 text-white transition hover:bg-white hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-white">Stop automatic renewal</Button>
               </div>
             ) : (
               <Button onClick={onUpgrade} className="mt-6 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/30 hover:opacity-90">
@@ -2049,15 +2047,14 @@ const Footer = ({ onLegal, landing }) => (
   <footer className={'mt-8 border-t border-white/5 ' + (landing ? '' : 'mb-20 md:mb-0')}>
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
-        <div className="flex items-center gap-2 text-slate-400">
-          <img src="/logo.png" alt="FOOTUP" className="h-8 w-8" />
-          <span className="text-sm font-bold text-white">FOOT<span className="text-emerald-400">UP</span></span>
+        <div className="flex items-center gap-2 text-slate-300">
+          <img src="/logo.png" alt="FOOTUP" className="h-6 w-auto opacity-90" />
           <span className="text-xs">© 2026 FOOTUP ASD. All rights reserved.</span>
         </div>
-        <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-400">
-          <button onClick={() => onLegal('about')} className="hover:text-white">About FOOTUP ASD</button>
-          <button onClick={() => onLegal('terms')} className="hover:text-white">Terms of Service</button>
-          <button onClick={() => onLegal('privacy')} className="hover:text-white">Privacy Policy</button>
+        <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-300">
+          <button onClick={() => onLegal('about')} className="hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded">About FOOTUP ASD</button>
+          <button onClick={() => onLegal('terms')} className="hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded">Terms of Service</button>
+          <button onClick={() => onLegal('privacy')} className="hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded">Privacy Policy</button>
           <button onClick={() => onLegal('cookies')} className="hover:text-white">Cookie Policy</button>
         </nav>
       </div>

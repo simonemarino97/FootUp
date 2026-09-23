@@ -27,6 +27,92 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+/* -------- Sprint 5: Global contrast + focus/hover states -------- */
+
+/* Design tokens (FOOTUP) */
+:root {
+  --footup-primary: #10b981;   /* emerald 500 */
+  --footup-primary-hover: #34d399;
+  --footup-primary-dark: #047857;
+  --footup-accent: #06b6d4;    /* cyan 500 */
+  --footup-warning: #f59e0b;
+  --footup-danger:  #f43f5e;
+  --footup-success: #22c55e;
+  --footup-text:    #f1f5f9;   /* slate 100 */
+  --footup-muted:   #cbd5e1;   /* slate 300 - lifted from 400 for readability */
+  --footup-border:  rgba(255,255,255,.18);
+  --footup-border-strong: rgba(255,255,255,.35);
+  --footup-focus:   #34d399;
+}
+
+/* Accessible keyboard focus everywhere */
+*:focus-visible {
+  outline: 2px solid var(--footup-focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible {
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, .45);
+}
+
+/* Inputs & textareas: stronger border + brighter placeholder */
+input, textarea, select {
+  color: var(--footup-text);
+}
+input::placeholder,
+textarea::placeholder {
+  color: rgba(203, 213, 225, .55) !important; /* slate 300 @ 55% */
+}
+input:focus, textarea:focus {
+  border-color: var(--footup-focus) !important;
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, .25);
+}
+
+/* Ghost / outline buttons on dark: WHITE border + WHITE text + smooth invert on hover */
+.btn-ghost-dark,
+button[data-variant="outline"] {
+  border-color: rgba(255,255,255,.55) !important;
+  color: #ffffff !important;
+  background-color: rgba(255,255,255,.04);
+  transition: all 220ms ease;
+}
+.btn-ghost-dark:hover,
+button[data-variant="outline"]:hover {
+  background-color: #ffffff !important;
+  color: #052e1a !important;
+  border-color: #ffffff !important;
+}
+
+/* Improve default disabled state contrast */
+button:disabled,
+[disabled] {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+/* Muted text lift for readability on dark backgrounds */
+.text-slate-500 { color: #94a3b8; }  /* keep as-is but note */
+.text-slate-400 { color: #cbd5e1; }  /* lift 400 -> 300 */
+
+/* Links */
+a { transition: color 200ms ease; }
+a:hover { color: var(--footup-primary-hover); }
+
+/* Better tap targets on mobile */
+@media (pointer: coarse) {
+  button, a[role="button"], [role="tab"] {
+    min-height: 40px;
+  }
+}
+
+/* Toast (sonner) contrast bump */
+[data-sonner-toaster] [data-sonner-toast] {
+  border: 1px solid rgba(255,255,255,.15) !important;
+}
+
+
 code {
     font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
         monospace;
