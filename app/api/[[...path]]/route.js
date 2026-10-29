@@ -1,8 +1,25 @@
 import { v4 as uuidv4 } from 'uuid'
 import crypto from 'crypto'
 import { NextResponse } from 'next/server'
-import { getDb, hashPassword, verifyPassword, signToken, getSessionUser, makeAuthCookie, isPro, planStatus, randCode } from '@/lib/auth'
+import { getDb, hashPassword, verifyPassword, signToken, getSessionUser, makeAuthCookie, randCode } from '@/lib/auth'
 import { calcNewRatings, getDivision, START_RATING, computeReputation, computeBadges } from '@/lib/elo'
+import { getMembership, ensurePlayerRecord, publicUser, POSITIONS } from '@/lib/clubs'
+
+const HEX = /^#[0-9a-fA-F]{6}$/
+const KIT_PATTERNS = ['solid', 'stripes', 'hoops', 'halves', 'sash', 'pinstripes']
+function sanitizeKitPart(k = {}) {
+  return {
+    shirt: HEX.test(k.shirt) ? k.shirt : '#10b981',
+    sleeves: HEX.test(k.sleeves) ? k.sleeves : (HEX.test(k.shirt) ? k.shirt : '#10b981'),
+    accent: HEX.test(k.accent) ? k.accent : '#ffffff',
+    shorts: HEX.test(k.shorts) ? k.shorts : '#0b0f0d',
+    socks: HEX.test(k.socks) ? k.socks : '#0b0f0d',
+    pattern: KIT_PATTERNS.includes(k.pattern) ? k.pattern : 'solid',
+  }
+}
+function userAccount(u) {
+  return { is_founder: !!u?.is_founder, is_admin: !!u?.is_admin, referral_code: u?.referral_code || null, referrals_count: u?.referrals_count || 0 }
+}
 
 function corsResp(data, init = {}) {
   const res = NextResponse.json(data, init)
@@ -26,18 +43,30 @@ async function handler(request, { params }) {
   try {
     const db = await getDb()
 
-    // Helper: enrich team with captain plan info
+    // Helper: enrich team with captain info + member count
     const enrichTeamPlan = async (t) => {
       if (!t) return t
       const cap = await db.collection('users').findOne({ id: t.captain_id })
-      const ps = planStatus(cap)
-      return { ...t, plan: ps.plan, is_founder: ps.is_founder, pro_until: ps.pro_until, captain_name: cap?.name || null }
+      const member_count = await db.collection('club_members').countDocuments({ club_id: t.id, status: 'active' })
+      return { ...t, is_founder: !!cap?.is_founder, captain_name: cap?.name || null, member_count: Math.max(member_count, 1) }
     }
     const enrichTeamsPlan = async (list) => {
       const ids = [...new Set(list.map(t => t.captain_id))]
       const caps = await db.collection('users').find({ id: { $in: ids } }).toArray()
-      const map = Object.fromEntries(caps.map(u => [u.id, { ...planStatus(u), name: u.name }]))
-      return list.map(t => ({ ...t, plan: map[t.captain_id]?.plan || 'free', is_founder: !!map[t.captain_id]?.is_founder, pro_until: map[t.captain_id]?.pro_until || null, captain_name: map[t.captain_id]?.name || null }))
+      const map = Object.fromEntries(caps.map(u => [u.id, u]))
+      const counts = await db.collection('club_members').aggregate([
+        { $match: { club_id: { $in: list.map(t => t.id) }, status: 'active' } },
+        { $group: { _id: '$club_id', n: { $sum: 1 } } },
+      ]).toArray()
+      const cmap = Object.fromEntries(counts.map(c => [c._id, c.n]))
+      return list.map(t => ({ ...t, is_founder: !!map[t.captain_id]?.is_founder, captain_name: map[t.captain_id]?.name || null, member_count: Math.max(cmap[t.id] || 0, 1) }))
+    }
+    // Helper: session user + active club membership
+    const getCtx = async () => {
+      const user = await getSessionUser(request)
+      if (!user) return { user: null, membership: null, team: null }
+      const { membership, team } = await getMembership(db, user.id)
+      return { user, membership, team, isCaptain: membership?.role === 'captain' }
     }
 
     // ============ AUTH ============
@@ -57,9 +86,8 @@ async function handler(request, { params }) {
         name: name || email.split('@')[0],
         password_hash: hashPassword(password),
         avatar_url: null,
-        role: 'captain',
-        plan: 'free',
-        pro_until: null,
+        role: 'player',
+        bio: '', position: null, preferred_foot: null, jersey_number: null, city: '', birth_year: null,
         is_founder: userCount < 100,
         is_admin: userCount === 0, // first user becomes admin
         referral_code,
@@ -67,21 +95,12 @@ async function handler(request, { params }) {
         referrals_count: 0,
         created_at: new Date(),
       }
-      // handle referral
+      // handle referral (community invite counter only)
       if (referral) {
         const inviter = await db.collection('users').findOne({ referral_code: referral.toUpperCase() })
         if (inviter) {
           user.referred_by = inviter.id
-          const newCount = (inviter.referrals_count || 0) + 1
-          const upd = { $inc: { referrals_count: 1 } }
-          // rewards: 5 -> 30 days, 20 -> 90 days
-          if (newCount === 5 || newCount === 20) {
-            const days = newCount === 5 ? 30 : 90
-            const base = inviter.pro_until && new Date(inviter.pro_until) > new Date() ? new Date(inviter.pro_until) : new Date()
-            base.setDate(base.getDate() + days)
-            upd.$set = { plan: 'pro', pro_until: base }
-          }
-          await db.collection('users').updateOne({ id: inviter.id }, upd)
+          await db.collection('users').updateOne({ id: inviter.id }, { $inc: { referrals_count: 1 } })
         }
       }
       await db.collection('users').insertOne(user)
@@ -110,9 +129,171 @@ async function handler(request, { params }) {
     if (route === '/auth/me' && method === 'GET') {
       const user = await getSessionUser(request)
       if (!user) return corsResp({ user: null })
-      const team = await db.collection('teams').findOne({ captain_id: user.id })
-      const plan = planStatus(user)
-      return corsResp({ user: { ...user, ...plan }, team: team ? { ...clean(team), plan: plan.plan, is_founder: plan.is_founder } : null })
+      const { membership, team } = await getMembership(db, user.id)
+      const role = membership?.role || 'free_agent'
+      let pending_requests_count = 0
+      if (role === 'captain' && team) pending_requests_count = await db.collection('join_requests').countDocuments({ club_id: team.id, status: 'pending' })
+      const my_requests = await db.collection('join_requests').find({ user_id: user.id, status: 'pending' }).sort({ created_at: -1 }).toArray()
+      return corsResp({
+        user: { ...user, ...userAccount(user), club_role: role },
+        team: team ? { ...clean(team), is_founder: !!user.is_founder } : null,
+        membership: membership ? clean(membership) : null,
+        role,
+        pending_requests_count,
+        my_requests: my_requests.map(clean),
+      })
+    }
+
+    // ============ MY PLAYER PROFILE ============
+    if (route === '/me/profile' && method === 'PUT') {
+      const { user, membership, team } = await getCtx()
+      if (!user) return err('unauthorized', 401)
+      const body = await request.json()
+      const upd = {}
+      if (typeof body.name === 'string' && body.name.trim()) upd.name = body.name.trim().slice(0, 60)
+      if (body.avatar_url !== undefined) upd.avatar_url = body.avatar_url || null
+      if (typeof body.bio === 'string') upd.bio = body.bio.slice(0, 280)
+      if (body.position !== undefined) upd.position = POSITIONS.includes(body.position) ? body.position : null
+      if (body.preferred_foot !== undefined) upd.preferred_foot = ['right', 'left', 'both'].includes(body.preferred_foot) ? body.preferred_foot : null
+      if (body.jersey_number !== undefined) {
+        const n = parseInt(body.jersey_number)
+        upd.jersey_number = Number.isFinite(n) && n >= 1 && n <= 99 ? n : null
+      }
+      if (typeof body.city === 'string') upd.city = body.city.slice(0, 60)
+      if (body.birth_year !== undefined) {
+        const y = parseInt(body.birth_year)
+        upd.birth_year = Number.isFinite(y) && y > 1930 && y <= new Date().getFullYear() ? y : null
+      }
+      await db.collection('users').updateOne({ id: user.id }, { $set: upd })
+      // keep linked roster entry in sync
+      if (membership && team) {
+        const pu = {}
+        if (upd.name) { const [f, ...r] = upd.name.split(' '); pu.first_name = f; pu.last_name = r.join(' ') }
+        if ('position' in upd && upd.position) pu.position = upd.position
+        if ('jersey_number' in upd) pu.shirt_number = upd.jersey_number
+        if ('avatar_url' in upd) pu.photo_url = upd.avatar_url
+        if ('preferred_foot' in upd && upd.preferred_foot) pu.foot = upd.preferred_foot
+        if (Object.keys(pu).length) await db.collection('players').updateOne({ user_id: user.id, team_id: team.id }, { $set: pu })
+        const mu = {}
+        if ('position' in upd) mu.position = upd.position
+        if ('jersey_number' in upd) mu.jersey_number = upd.jersey_number
+        if (Object.keys(mu).length) await db.collection('club_members').updateOne({ id: membership.id }, { $set: mu })
+      }
+      const fresh = await db.collection('users').findOne({ id: user.id })
+      return corsResp({ user: publicUser(fresh) })
+    }
+
+    if (route === '/me/join-requests' && method === 'GET') {
+      const user = await getSessionUser(request)
+      if (!user) return err('unauthorized', 401)
+      const list = await db.collection('join_requests').find({ user_id: user.id }).sort({ created_at: -1 }).limit(50).toArray()
+      return corsResp({ requests: list.map(clean) })
+    }
+
+    // ============ PUBLIC PLAYER PROFILE ============
+    if (parts[0] === 'players' && parts[1] && !parts[2] && method === 'GET') {
+      const u = await db.collection('users').findOne({ id: parts[1] })
+      if (!u) return err('player not found', 404)
+      const { membership, team } = await getMembership(db, u.id)
+      let club = null, stats = { matches: 0, goals: 0, assists: 0, mvps: 0, yellows: 0, reds: 0 }
+      if (team) {
+        club = {
+          id: team.id, name: team.name, logo_url: team.logo_url || null, city: team.city || '',
+          primary_color: team.primary_color, secondary_color: team.secondary_color,
+          rating: team.rating, division: getDivision(team.rating), reputation: computeReputation(team),
+          role: membership.role, jersey_number: membership.jersey_number ?? u.jersey_number ?? null,
+          joined_at: membership.joined_at, kit: team.kit || null,
+        }
+      }
+      const records = await db.collection('players').find({ user_id: u.id }).toArray()
+      for (const r of records) for (const k of Object.keys(stats)) stats[k] += r[k] || 0
+      return corsResp({
+        player: { ...publicUser(u), status: team ? 'club_member' : 'free_agent', club_role: membership?.role || 'free_agent' },
+        club, stats,
+      })
+    }
+
+    // ============ DISCOVER ============
+    if (route === '/discover/players' && method === 'GET') {
+      const url = new URL(request.url)
+      const q = url.searchParams.get('q') || ''
+      const position = url.searchParams.get('position') || ''
+      const status = url.searchParams.get('status') || 'all' // all | free_agent | club_member
+      const filter = {}
+      if (q) filter.$or = [{ name: { $regex: q, $options: 'i' } }, { city: { $regex: q, $options: 'i' } }]
+      if (position && POSITIONS.includes(position)) filter.position = position
+      const users = await db.collection('users').find(filter).sort({ created_at: -1 }).limit(150).toArray()
+      const mems = await db.collection('club_members').find({ user_id: { $in: users.map(u => u.id) }, status: 'active' }).toArray()
+      const legacyTeams = await db.collection('teams').find({ captain_id: { $in: users.map(u => u.id) } }).toArray()
+      const memMap = Object.fromEntries(mems.map(m => [m.user_id, m]))
+      for (const t of legacyTeams) if (!memMap[t.captain_id]) memMap[t.captain_id] = { club_id: t.id, role: 'captain' }
+      const clubIds = [...new Set(Object.values(memMap).map(m => m.club_id))]
+      const clubs = await db.collection('teams').find({ id: { $in: clubIds } }).toArray()
+      const cmap = Object.fromEntries(clubs.map(c => [c.id, c]))
+      let list = users.map(u => {
+        const m = memMap[u.id]
+        const c = m ? cmap[m.club_id] : null
+        return {
+          ...publicUser(u),
+          status: c ? 'club_member' : 'free_agent',
+          club_role: c ? m.role : 'free_agent',
+          club: c ? { id: c.id, name: c.name, logo_url: c.logo_url || null, primary_color: c.primary_color } : null,
+        }
+      })
+      if (status !== 'all') list = list.filter(p => p.status === status)
+      return corsResp({ players: list.slice(0, 100) })
+    }
+
+    // ============ JOIN REQUEST ACTIONS ============
+    if (parts[0] === 'join-requests' && parts[1] && ['accept', 'reject', 'cancel'].includes(parts[2]) && method === 'POST') {
+      const user = await getSessionUser(request)
+      if (!user) return err('unauthorized', 401)
+      const jr = await db.collection('join_requests').findOne({ id: parts[1] })
+      if (!jr) return err('request not found', 404)
+      if (jr.status !== 'pending') return err('request already ' + jr.status, 400)
+      if (parts[2] === 'cancel') {
+        if (jr.user_id !== user.id) return err('forbidden', 403)
+        await db.collection('join_requests').updateOne({ id: jr.id }, { $set: { status: 'cancelled', decided_at: new Date() } })
+        return corsResp({ ok: true, status: 'cancelled' })
+      }
+      // accept / reject: only captain of that club
+      const { membership } = await getMembership(db, user.id)
+      if (!membership || membership.club_id !== jr.club_id || membership.role !== 'captain') return err('only the club captain can do this', 403)
+      if (parts[2] === 'reject') {
+        await db.collection('join_requests').updateOne({ id: jr.id }, { $set: { status: 'rejected', decided_at: new Date(), decided_by: user.id } })
+        return corsResp({ ok: true, status: 'rejected' })
+      }
+      // accept
+      const applicant = await db.collection('users').findOne({ id: jr.user_id })
+      if (!applicant) return err('applicant no longer exists', 404)
+      const { membership: other } = await getMembership(db, applicant.id)
+      if (other) {
+        await db.collection('join_requests').updateOne({ id: jr.id }, { $set: { status: 'cancelled', decided_at: new Date(), reason: 'already_in_club' } })
+        return err('player already belongs to a club', 409)
+      }
+      const jersey = jr.jersey_number ?? applicant.jersey_number ?? null
+      const position = jr.position || applicant.position || 'MID'
+      const mem = { id: uuidv4(), user_id: applicant.id, club_id: jr.club_id, role: 'player', jersey_number: jersey, position, status: 'active', joined_at: new Date() }
+      await db.collection('club_members').insertOne(mem)
+      await ensurePlayerRecord(db, applicant, jr.club_id, { jersey_number: jersey, position })
+      await db.collection('join_requests').updateOne({ id: jr.id }, { $set: { status: 'accepted', decided_at: new Date(), decided_by: user.id } })
+      await db.collection('join_requests').updateMany({ user_id: applicant.id, status: 'pending', id: { $ne: jr.id } }, { $set: { status: 'cancelled', decided_at: new Date(), reason: 'joined_other_club' } })
+      return corsResp({ ok: true, status: 'accepted', membership: clean(mem) })
+    }
+
+    // ============ LEAVE CLUB ============
+    if (route === '/me/leave-club' && method === 'POST') {
+      const { user, membership, team } = await getCtx()
+      if (!user) return err('unauthorized', 401)
+      if (!membership) return err('you are not in a club', 400)
+      if (membership.role === 'captain') {
+        const others = await db.collection('club_members').countDocuments({ club_id: team.id, status: 'active', user_id: { $ne: user.id } })
+        if (others > 0) return err('transfer captaincy before leaving the club', 400)
+        return err('you are the only member: captains cannot leave their own club', 400)
+      }
+      await db.collection('club_members').updateOne({ id: membership.id }, { $set: { status: 'left', left_at: new Date() } })
+      await db.collection('players').updateOne({ user_id: user.id, team_id: team.id }, { $set: { team_id: null, former_team_id: team.id, left_at: new Date() } })
+      return corsResp({ ok: true })
     }
 
     // ============ GOOGLE OAUTH ============
@@ -189,9 +370,8 @@ async function handler(request, { params }) {
             password_hash: null,
             google_id: gu.sub,
             avatar_url: gu.picture || null,
-            role: 'captain',
-            plan: 'free',
-            pro_until: null,
+            role: 'player',
+            bio: '', position: null, preferred_foot: null, jersey_number: null, city: '', birth_year: null,
             is_founder: userCount < 100,
             is_admin: userCount === 0,
             referral_code,
@@ -203,15 +383,7 @@ async function handler(request, { params }) {
             const inviter = await db.collection('users').findOne({ referral_code: referral.toUpperCase() })
             if (inviter) {
               user.referred_by = inviter.id
-              const newCount = (inviter.referrals_count || 0) + 1
-              const upd = { $inc: { referrals_count: 1 } }
-              if (newCount === 5 || newCount === 20) {
-                const days = newCount === 5 ? 30 : 90
-                const base = inviter.pro_until && new Date(inviter.pro_until) > new Date() ? new Date(inviter.pro_until) : new Date()
-                base.setDate(base.getDate() + days)
-                upd.$set = { plan: 'pro', pro_until: base }
-              }
-              await db.collection('users').updateOne({ id: inviter.id }, upd)
+              await db.collection('users').updateOne({ id: inviter.id }, { $inc: { referrals_count: 1 } })
             }
           }
           await db.collection('users').insertOne(user)
@@ -235,15 +407,17 @@ async function handler(request, { params }) {
 
     // ============ TEAMS ============
     if (route === '/teams' && method === 'POST') {
-      const user = await getSessionUser(request)
+      const { user, membership } = await getCtx()
       if (!user) return err('unauthorized', 401)
-      const existing = await db.collection('teams').findOne({ captain_id: user.id })
-      if (existing) return err('You already have a team', 409)
+      if (membership) return err('You already belong to a club', 409)
       const body = await request.json()
+      if (!body.name || !String(body.name).trim()) return err('club name required')
       const team = {
         id: uuidv4(),
         captain_id: user.id,
-        name: body.name,
+        name: String(body.name).trim(),
+        recruiting: body.recruiting !== false,
+        kit: null,
         logo_url: body.logo_url || null,
         cover_url: body.cover_url || null,
         founded_year: body.founded_year || new Date().getFullYear(),
@@ -265,21 +439,28 @@ async function handler(request, { params }) {
         created_at: new Date(),
       }
       await db.collection('teams').insertOne(team)
+      await db.collection('club_members').insertOne({
+        id: uuidv4(), user_id: user.id, club_id: team.id, role: 'captain',
+        jersey_number: user.jersey_number ?? null, position: user.position || null, status: 'active', joined_at: new Date(),
+      })
+      await ensurePlayerRecord(db, user, team.id, { is_captain: true })
+      await db.collection('join_requests').updateMany({ user_id: user.id, status: 'pending' }, { $set: { status: 'cancelled', decided_at: new Date(), reason: 'created_club' } })
       return corsResp({ team: clean(team) })
     }
 
     if (route === '/teams' && method === 'GET') {
       const url = new URL(request.url)
       const q = url.searchParams.get('q') || ''
+      const recruiting = url.searchParams.get('recruiting')
       const filter = q ? { $or: [
         { name: { $regex: q, $options: 'i' } },
         { city: { $regex: q, $options: 'i' } },
       ]} : {}
+      if (recruiting === '1') filter.recruiting = { $ne: false }
       const teams = await db.collection('teams').find(filter).limit(100).toArray()
       const enriched = await enrichTeamsPlan(teams.map(clean))
-      // PRO priority in search results
-      enriched.sort((a, b) => (b.plan === 'pro') - (a.plan === 'pro') || b.rating - a.rating)
-      return corsResp({ teams: enriched.map(t => ({ ...t, division: getDivision(t.rating) })) })
+      enriched.sort((a, b) => b.rating - a.rating)
+      return corsResp({ teams: enriched.map(t => ({ ...t, recruiting: t.recruiting !== false, division: getDivision(t.rating), reputation: computeReputation(t) })) })
     }
 
     // /teams/:id ; /teams/:id/players ; /teams/:id/follow
@@ -295,6 +476,23 @@ async function handler(request, { params }) {
         const reputation = computeReputation(team)
         const badges = computeBadges(team)
         const divisionEvents = await db.collection('division_events').find({ team_id: teamId }).sort({ at: -1 }).limit(5).toArray()
+        // members (registered users in the club)
+        const mems = await db.collection('club_members').find({ club_id: teamId, status: 'active' }).toArray()
+        const memUsers = await db.collection('users').find({ id: { $in: mems.map(m => m.user_id) } }).toArray()
+        const umap = Object.fromEntries(memUsers.map(u => [u.id, u]))
+        const members = mems.map(m => ({ ...publicUser(umap[m.user_id]), role: m.role, jersey_number: m.jersey_number ?? umap[m.user_id]?.jersey_number ?? null, position: m.position || umap[m.user_id]?.position || null, joined_at: m.joined_at }))
+          .filter(m => m.id).sort((a, b) => (b.role === 'captain') - (a.role === 'captain'))
+        // viewer context
+        const viewer = await getSessionUser(request)
+        let my_role = null, my_pending_request = null
+        if (viewer) {
+          const { membership: vm } = await getMembership(db, viewer.id)
+          if (vm?.club_id === teamId) my_role = vm.role
+          else if (!vm) my_role = 'free_agent'
+          else my_role = 'other_club'
+          const pr = await db.collection('join_requests').findOne({ user_id: viewer.id, club_id: teamId, status: 'pending' })
+          if (pr) my_pending_request = clean(pr)
+        }
         // extra derived stats
         const gd = (team.goals_for || 0) - (team.goals_against || 0)
         const avg_gf = team.matches_played ? +(team.goals_for / team.matches_played).toFixed(2) : 0
@@ -312,9 +510,14 @@ async function handler(request, { params }) {
             total_yellows: team.total_yellows || 0,
             total_reds: team.total_reds || 0,
             division_events: divisionEvents.map(clean),
+            recruiting: team.recruiting !== false,
+            kit: team.kit || null,
           },
           players: players.map(clean),
           posts: posts.map(clean),
+          members,
+          my_role,
+          my_pending_request,
         })
       }
 
@@ -351,20 +554,31 @@ async function handler(request, { params }) {
       }
 
       if (!parts[2] && method === 'PUT') {
-        const user = await getSessionUser(request)
-        if (!user || user.id !== team.captain_id) return err('forbidden', 403)
+        const { user, membership } = await getCtx()
+        if (!user || membership?.club_id !== teamId || membership.role !== 'captain') return err('only the club captain can edit the club', 403)
         const body = await request.json()
-        const allowed = ['name','logo_url','cover_url','founded_year','description','primary_color','secondary_color','facility','city','province','football_type']
+        const allowed = ['name','logo_url','cover_url','founded_year','description','primary_color','secondary_color','facility','city','province','football_type','recruiting']
         const upd = {}
         for (const k of allowed) if (body[k] !== undefined) upd[k] = body[k]
+        if (body.kit !== undefined) {
+          const k = body.kit || {}
+          upd.kit = {
+            home: sanitizeKitPart(k.home),
+            away: sanitizeKitPart(k.away),
+            legea_collection: typeof k.legea_collection === 'string' ? k.legea_collection.slice(0, 60) : '103 Color',
+            notes: typeof k.notes === 'string' ? k.notes.slice(0, 280) : '',
+            updated_at: new Date(),
+          }
+        }
+        if (upd.name !== undefined && !String(upd.name).trim()) return err('club name required')
         await db.collection('teams').updateOne({ id: teamId }, { $set: upd })
         const updated = await db.collection('teams').findOne({ id: teamId })
         return corsResp({ team: { ...clean(updated), division: getDivision(updated.rating) } })
       }
 
       if (parts[2] === 'players' && method === 'POST') {
-        const user = await getSessionUser(request)
-        if (!user || user.id !== team.captain_id) return err('forbidden', 403)
+        const { user, membership } = await getCtx()
+        if (!user || membership?.club_id !== teamId || membership.role !== 'captain') return err('only the club captain can manage the roster', 403)
         const body = await request.json()
         const player = {
           id: uuidv4(),
@@ -392,14 +606,76 @@ async function handler(request, { params }) {
           isFollowing ? { $pull: { followers: user.id } } : { $addToSet: { followers: user.id } })
         return corsResp({ following: !isFollowing })
       }
+
+      // ---- Join requests ----
+      if (parts[2] === 'join-request' && method === 'POST') {
+        const { user, membership } = await getCtx()
+        if (!user) return err('unauthorized', 401)
+        if (membership) return err(membership.club_id === teamId ? 'you are already in this club' : 'you already belong to a club (one club per player)', 409)
+        if (team.recruiting === false) return err('this club is not accepting requests right now', 400)
+        const dup = await db.collection('join_requests').findOne({ user_id: user.id, club_id: teamId, status: 'pending' })
+        if (dup) return err('request already pending', 409)
+        const body = await request.json().catch(() => ({}))
+        const n = parseInt(body.jersey_number)
+        const jr = {
+          id: uuidv4(), user_id: user.id, user_name: user.name, user_avatar: user.avatar_url || null,
+          club_id: teamId, club_name: team.name, club_logo: team.logo_url || null,
+          message: typeof body.message === 'string' ? body.message.slice(0, 280) : '',
+          position: POSITIONS.includes(body.position) ? body.position : (user.position || null),
+          jersey_number: Number.isFinite(n) && n >= 1 && n <= 99 ? n : (user.jersey_number ?? null),
+          status: 'pending', created_at: new Date(),
+        }
+        await db.collection('join_requests').insertOne(jr)
+        return corsResp({ request: clean(jr) })
+      }
+
+      if (parts[2] === 'join-requests' && method === 'GET') {
+        const { user, membership } = await getCtx()
+        if (!user || membership?.club_id !== teamId || membership.role !== 'captain') return err('only the club captain can view requests', 403)
+        const list = await db.collection('join_requests').find({ club_id: teamId, status: 'pending' }).sort({ created_at: -1 }).toArray()
+        const us = await db.collection('users').find({ id: { $in: list.map(r => r.user_id) } }).toArray()
+        const um = Object.fromEntries(us.map(u => [u.id, publicUser(u)]))
+        return corsResp({ requests: list.map(r => ({ ...clean(r), user: um[r.user_id] || null })) })
+      }
+
+      if (parts[2] === 'members' && method === 'GET') {
+        const mems = await db.collection('club_members').find({ club_id: teamId, status: 'active' }).toArray()
+        const us = await db.collection('users').find({ id: { $in: mems.map(m => m.user_id) } }).toArray()
+        const um = Object.fromEntries(us.map(u => [u.id, u]))
+        return corsResp({ members: mems.filter(m => um[m.user_id]).map(m => ({ ...publicUser(um[m.user_id]), role: m.role, jersey_number: m.jersey_number, position: m.position, joined_at: m.joined_at })) })
+      }
+
+      if (parts[2] === 'members' && parts[3] && method === 'DELETE') {
+        const { user, membership } = await getCtx()
+        if (!user || membership?.club_id !== teamId || membership.role !== 'captain') return err('only the club captain can remove members', 403)
+        if (parts[3] === user.id) return err('captain cannot remove themselves', 400)
+        const target = await db.collection('club_members').findOne({ club_id: teamId, user_id: parts[3], status: 'active' })
+        if (!target) return err('member not found', 404)
+        await db.collection('club_members').updateOne({ id: target.id }, { $set: { status: 'removed', left_at: new Date() } })
+        await db.collection('players').updateOne({ user_id: parts[3], team_id: teamId }, { $set: { team_id: null, former_team_id: teamId, left_at: new Date() } })
+        return corsResp({ ok: true })
+      }
+
+      if (parts[2] === 'transfer-captain' && method === 'POST') {
+        const { user, membership } = await getCtx()
+        if (!user || membership?.club_id !== teamId || membership.role !== 'captain') return err('only the club captain can transfer captaincy', 403)
+        const { user_id } = await request.json()
+        const target = await db.collection('club_members').findOne({ club_id: teamId, user_id, status: 'active' })
+        if (!target || user_id === user.id) return err('target must be another club member', 400)
+        await db.collection('club_members').updateOne({ id: target.id }, { $set: { role: 'captain' } })
+        await db.collection('club_members').updateOne({ id: membership.id }, { $set: { role: 'player' } })
+        await db.collection('teams').updateOne({ id: teamId }, { $set: { captain_id: user_id } })
+        await db.collection('players').updateOne({ user_id, team_id: teamId }, { $set: { is_captain: true } })
+        await db.collection('players').updateOne({ user_id: user.id, team_id: teamId }, { $set: { is_captain: false } })
+        return corsResp({ ok: true })
+      }
     }
 
     // ============ POSTS / FEED ============
     if (route === '/posts' && method === 'POST') {
-      const user = await getSessionUser(request)
+      const { user, team } = await getCtx()
       if (!user) return err('unauthorized', 401)
-      const team = await db.collection('teams').findOne({ captain_id: user.id })
-      if (!team) return err('create a team first', 400)
+      if (!team) return err('join or create a club first', 400)
       const body = await request.json()
       const post = {
         id: uuidv4(),
@@ -447,10 +723,10 @@ async function handler(request, { params }) {
 
     // ============ CHALLENGES ============
     if (route === '/challenges' && method === 'POST') {
-      const user = await getSessionUser(request)
+      const { user, team, isCaptain } = await getCtx()
       if (!user) return err('unauthorized', 401)
-      const team = await db.collection('teams').findOne({ captain_id: user.id })
       if (!team) return err('create a team first', 400)
+      if (!isCaptain) return err('only the club captain can publish challenges', 403)
       const body = await request.json()
       const ch = {
         id: uuidv4(),
@@ -479,10 +755,10 @@ async function handler(request, { params }) {
     }
 
     if (parts[0] === 'challenges' && parts[1] && parts[2] === 'accept' && method === 'POST') {
-      const user = await getSessionUser(request)
+      const { user, team: myTeam, isCaptain } = await getCtx()
       if (!user) return err('unauthorized', 401)
-      const myTeam = await db.collection('teams').findOne({ captain_id: user.id })
       if (!myTeam) return err('create a team first', 400)
+      if (!isCaptain) return err('only the club captain can accept challenges', 403)
       const ch = await db.collection('challenges').findOne({ id: parts[1] })
       if (!ch) return err('not found', 404)
       if (ch.team_id === myTeam.id) return err('cannot accept own challenge', 400)
@@ -509,9 +785,8 @@ async function handler(request, { params }) {
 
     // ============ MATCHES ============
     if (route === '/matches' && method === 'GET') {
-      const user = await getSessionUser(request)
+      const { user, team } = await getCtx()
       if (!user) return err('unauthorized', 401)
-      const team = await db.collection('teams').findOne({ captain_id: user.id })
       if (!team) return corsResp({ matches: [] })
       const matches = await db.collection('matches').find({
         $or: [{ home_team_id: team.id }, { away_team_id: team.id }]
@@ -520,10 +795,10 @@ async function handler(request, { params }) {
     }
 
     if (parts[0] === 'matches' && parts[1] && parts[2] === 'confirm' && method === 'POST') {
-      const user = await getSessionUser(request)
+      const { user, team: myTeam, isCaptain } = await getCtx()
       if (!user) return err('unauthorized', 401)
-      const myTeam = await db.collection('teams').findOne({ captain_id: user.id })
       if (!myTeam) return err('no team', 400)
+      if (!isCaptain) return err('only the club captain can confirm results', 403)
       const match = await db.collection('matches').findOne({ id: parts[1] })
       if (!match) return err('not found', 404)
       if (![match.home_team_id, match.away_team_id].includes(myTeam.id)) return err('not part of this match', 403)
@@ -638,39 +913,6 @@ async function handler(request, { params }) {
       return corsResp({ divisions: divs })
     }
 
-    // ============ SUBSCRIPTION ============
-    if (route === '/subscription/status' && method === 'GET') {
-      const user = await getSessionUser(request)
-      if (!user) return err('unauthorized', 401)
-      return corsResp(planStatus(user))
-    }
-
-    // Placeholder for Stripe: upgrades user to PRO for 1 year immediately
-    if (route === '/subscription/upgrade' && method === 'POST') {
-      const user = await getSessionUser(request)
-      if (!user) return err('unauthorized', 401)
-      const body = await request.json().catch(() => ({}))
-      // In real Stripe flow: create checkout session, redirect user, then Stripe webhook triggers activation.
-      // TODO(Stripe): replace this block with checkout.session.create + webhook handler on /api/subscription/webhook
-      const base = user.pro_until && new Date(user.pro_until) > new Date() ? new Date(user.pro_until) : new Date()
-      base.setFullYear(base.getFullYear() + 1)
-      await db.collection('users').updateOne({ id: user.id }, { $set: { plan: 'pro', pro_until: base } })
-      await db.collection('subscriptions').insertOne({
-        id: uuidv4(), user_id: user.id, plan: 'pro', amount: 9.99, currency: 'EUR',
-        provider: body.provider || 'placeholder', status: 'active',
-        started_at: new Date(), renews_at: base,
-      })
-      return corsResp({ ok: true, plan: 'pro', pro_until: base })
-    }
-
-    if (route === '/subscription/cancel' && method === 'POST') {
-      const user = await getSessionUser(request)
-      if (!user) return err('unauthorized', 401)
-      // Keep PRO benefits until pro_until then downgrade automatically (planStatus already checks expiry)
-      await db.collection('subscriptions').updateMany({ user_id: user.id, status: 'active' }, { $set: { status: 'cancelled', cancelled_at: new Date() } })
-      return corsResp({ ok: true, message: 'Subscription cancelled. PRO access remains until ' + (user.pro_until || 'end of period') })
-    }
-
     // ============ REFERRALS ============
     if (route === '/referrals/me' && method === 'GET') {
       const user = await getSessionUser(request)
@@ -683,13 +925,11 @@ async function handler(request, { params }) {
         await db.collection('users').updateOne({ id: user.id }, { $set: { referral_code: code } })
       }
       const referred = await db.collection('users').find({ referred_by: user.id }).project({ id:1, name:1, email:1, created_at:1 }).toArray()
-      const next = user.referrals_count < 5 ? 5 : user.referrals_count < 20 ? 20 : null
       return corsResp({
         referral_code: code,
         referral_url: `${process.env.NEXT_PUBLIC_BASE_URL || ''}/?ref=${code}`,
         referrals_count: user.referrals_count || 0,
         referred: referred.map(({ _id, ...r }) => r),
-        next_milestone: next,
       })
     }
 
@@ -702,15 +942,7 @@ async function handler(request, { params }) {
       if (!inviter) return err('Invalid referral code', 404)
       if (inviter.id === user.id) return err('Cannot refer yourself', 400)
       await db.collection('users').updateOne({ id: user.id }, { $set: { referred_by: inviter.id } })
-      const newCount = (inviter.referrals_count || 0) + 1
-      const upd = { $inc: { referrals_count: 1 } }
-      if (newCount === 5 || newCount === 20) {
-        const days = newCount === 5 ? 30 : 90
-        const base = inviter.pro_until && new Date(inviter.pro_until) > new Date() ? new Date(inviter.pro_until) : new Date()
-        base.setDate(base.getDate() + days)
-        upd.$set = { plan: 'pro', pro_until: base }
-      }
-      await db.collection('users').updateOne({ id: inviter.id }, upd)
+      await db.collection('users').updateOne({ id: inviter.id }, { $inc: { referrals_count: 1 } })
       return corsResp({ ok: true })
     }
 
@@ -719,48 +951,23 @@ async function handler(request, { params }) {
       const user = await getSessionUser(request)
       if (!user?.is_admin) return err('forbidden', 403)
 
-      if (route === '/admin/subscriptions' && method === 'GET') {
-        const subs = await db.collection('subscriptions').find({}).sort({ started_at: -1 }).limit(200).toArray()
-        return corsResp({ subscriptions: subs.map(clean) })
-      }
-      if (route === '/admin/pro-teams' && method === 'GET') {
-        const proUsers = await db.collection('users').find({ plan: 'pro', pro_until: { $gt: new Date() } }).toArray()
-        const ids = proUsers.map(u => u.id)
-        const teams = await db.collection('teams').find({ captain_id: { $in: ids } }).toArray()
-        return corsResp({ teams: await enrichTeamsPlan(teams.map(clean)) })
-      }
-      if (route === '/admin/grant-pro' && method === 'POST') {
-        const { user_id, days } = await request.json()
-        const target = await db.collection('users').findOne({ id: user_id })
-        if (!target) return err('user not found', 404)
-        const base = target.pro_until && new Date(target.pro_until) > new Date() ? new Date(target.pro_until) : new Date()
-        base.setDate(base.getDate() + (parseInt(days) || 30))
-        await db.collection('users').updateOne({ id: user_id }, { $set: { plan: 'pro', pro_until: base } })
-        await db.collection('subscriptions').insertOne({
-          id: uuidv4(), user_id, plan: 'pro', amount: 0, currency: 'EUR',
-          provider: 'admin-grant', status: 'active', started_at: new Date(), renews_at: base,
-        })
-        return corsResp({ ok: true, pro_until: base })
-      }
       if (route === '/admin/stats' && method === 'GET') {
-        const [users, teams, matches, subs, proActive] = await Promise.all([
+        const [users, teams, matches, members, pendingRequests] = await Promise.all([
           db.collection('users').countDocuments(),
           db.collection('teams').countDocuments(),
           db.collection('matches').countDocuments(),
-          db.collection('subscriptions').countDocuments(),
-          db.collection('users').countDocuments({ plan: 'pro', pro_until: { $gt: new Date() } }),
+          db.collection('club_members').countDocuments({ status: 'active' }),
+          db.collection('join_requests').countDocuments({ status: 'pending' }),
         ])
-        return corsResp({ users, teams, matches, subs, pro_active: proActive })
+        return corsResp({ users, teams, matches, members, pending_requests: pendingRequests })
       }
     }
 
-    // ============ ADVANCED STATS (PRO only) ============
+    // ============ ADVANCED STATS (free for everyone) ============
     if (parts[0] === 'teams' && parts[1] && parts[2] === 'advanced-stats' && method === 'GET') {
       const teamId = parts[1]
       const team = await db.collection('teams').findOne({ id: teamId })
       if (!team) return err('team not found', 404)
-      const captain = await db.collection('users').findOne({ id: team.captain_id })
-      if (!isPro(captain)) return err('PRO subscription required', 402)
       const matches = await db.collection('matches').find({
         $or: [{ home_team_id: teamId }, { away_team_id: teamId }], status: 'confirmed'
       }).sort({ created_at: 1 }).toArray()

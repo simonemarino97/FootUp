@@ -7,7 +7,7 @@ import {
   Home, Users, Swords, Trophy, Bell, Search, LogOut, Plus, Heart, MessageCircle,
   Share2, Camera, Flag, MapPin, Calendar, Clock, Shield, Award, TrendingUp,
   Target, Zap, Star, ChevronRight, X, Check, Circle, Menu, Sparkles, Crown,
-  BarChart3, UserPlus, Settings, Play, Gem, Gift, Rocket, Lock, CreditCard,
+  BarChart3, UserPlus, Settings, Play, Gem, Gift, Rocket, Lock, CreditCard, Shirt, Compass, ExternalLink,
   Copy, LineChart as LineChartIcon, PieChart as PieChartIcon, ShieldCheck
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { PlayerProfileView, DiscoverView, LegeaPartnerView, LegeaPromoCard, KitTab, ClubMembersPanel, JoinRequestDialog, FreeAgentBadge, RoleBadge, LEGEA_URL } from '@/components/footup/club'
 
 // -------- Helpers --------
 const api = async (path, opts = {}) => {
@@ -59,17 +60,19 @@ const divisionOf = (rating) => {
 export default function App() {
   const [user, setUser] = useState(null)
   const [team, setTeam] = useState(null)
-  const [view, setView] = useState('home') // home | feed | myteam | challenges | leaderboard | matches | tournaments | pricing | admin | referrals
+  const [view, setView] = useState('home') // home | feed | myteam | challenges | leaderboard | matches | tournaments | discover | partner | profile | admin | referrals
   const [authOpen, setAuthOpen] = useState(false)
-  const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [club, setClub] = useState({ role: 'free_agent', membership: null, my_requests: [], pending_requests_count: 0 })
+  const [selectedPlayerId, setSelectedPlayerId] = useState(null)
   const [legalPage, setLegalPage] = useState(null)
   const [loading, setLoading] = useState(true)
   const [selectedTeamId, setSelectedTeamId] = useState(null)
 
   const refresh = async () => {
     try {
-      const { user, team } = await api('/auth/me')
-      setUser(user); setTeam(team || null)
+      const d = await api('/auth/me')
+      setUser(d.user); setTeam(d.team || null)
+      setClub({ role: d.role || 'free_agent', membership: d.membership || null, my_requests: d.my_requests || [], pending_requests_count: d.pending_requests_count || 0 })
     } catch { setUser(null) }
   }
   useEffect(() => { refresh().finally(() => setLoading(false)) }, [])
@@ -97,41 +100,49 @@ export default function App() {
     </>
   )
 
-  const isPro = user.plan === 'pro'
+  const isCaptain = club.role === 'captain'
+  const goTeam = (id) => { setSelectedPlayerId(null); setSelectedTeamId(id); window.scrollTo?.(0, 0) }
+  const goPlayer = (id) => { setSelectedTeamId(null); setSelectedPlayerId(id); window.scrollTo?.(0, 0) }
+  const goView = (v) => { setSelectedTeamId(null); setSelectedPlayerId(null); setView(v); window.scrollTo?.(0, 0) }
 
   return (
     <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,#0b1220_0%,#050810_60%,#000_100%)] text-slate-100">
-      <TopBar user={user} team={team} view={view} setView={setView} onLogout={async () => { await api('/auth/logout', {method:'POST'}); refresh() }} onSelectTeam={setSelectedTeamId} onUpgrade={() => setUpgradeOpen(true)} />
+      <TopBar user={user} team={team} view={selectedPlayerId === user.id ? 'profile' : view} setView={goView} onLogout={async () => { await api('/auth/logout', {method:'POST'}); refresh() }} onSelectTeam={goTeam} onSelectPlayer={goPlayer} pendingCount={club.pending_requests_count} />
 
       <main className="mx-auto max-w-6xl px-4 pb-24 pt-6 md:pb-8">
-        {selectedTeamId ? (
-          <TeamPage teamId={selectedTeamId} onBack={() => setSelectedTeamId(null)} me={user} myTeam={team} onFollowChanged={refresh} onUpgrade={() => setUpgradeOpen(true)} />
+        {selectedPlayerId ? (
+          <PlayerProfileView userId={selectedPlayerId} me={user} onBack={() => setSelectedPlayerId(null)} onSelectTeam={goTeam} onMeChanged={refresh} onGoDiscover={() => goView('discover')} />
+        ) : selectedTeamId ? (
+          <TeamPage teamId={selectedTeamId} onBack={() => setSelectedTeamId(null)} me={user} myTeam={team} onFollowChanged={refresh} onSelectPlayer={goPlayer} onGoPartner={() => goView('partner')} />
         ) : view === 'home' ? (
-          <HomeDashboard user={user} team={team} onSelectTeam={setSelectedTeamId} onGoto={setView} onGoCreate={() => setView('myteam')} />
+          <HomeDashboard user={user} team={team} role={club.role} pendingCount={club.pending_requests_count} onSelectTeam={goTeam} onGoto={goView} onGoCreate={() => goView('myteam')} />
         ) : view === 'feed' ? (
-          <FeedView user={user} team={team} onSelectTeam={setSelectedTeamId} onGoCreate={() => setView('myteam')} />
+          <FeedView user={user} team={team} onSelectTeam={goTeam} onGoCreate={() => goView('myteam')} />
         ) : view === 'myteam' ? (
-          <MyTeamView user={user} team={team} onTeamCreated={refresh} onSelectTeam={setSelectedTeamId} onUpgrade={() => setUpgradeOpen(true)} />
+          <MyTeamView user={user} team={team} onTeamCreated={refresh} onSelectTeam={goTeam} onSelectPlayer={goPlayer} onGoDiscover={() => goView('discover')} onGoPartner={() => goView('partner')} />
         ) : view === 'challenges' ? (
-          <ChallengesView team={team} onNeedTeam={() => setView('myteam')} />
+          <ChallengesView team={team} isCaptain={isCaptain} onNeedTeam={() => goView('myteam')} />
         ) : view === 'matches' ? (
-          <MatchesView team={team} onSelectTeam={setSelectedTeamId} />
+          <MatchesView team={team} isCaptain={isCaptain} onSelectTeam={goTeam} />
         ) : view === 'leaderboard' ? (
-          <LeaderboardView onSelectTeam={setSelectedTeamId} />
+          <LeaderboardView onSelectTeam={goTeam} />
         ) : view === 'tournaments' ? (
           <TournamentsView />
-        ) : view === 'pricing' ? (
-          <PricingView user={user} onUpgrade={() => setUpgradeOpen(true)} onRefresh={refresh} />
+        ) : view === 'discover' ? (
+          <DiscoverView me={user} role={club.role} myRequests={club.my_requests} onSelectTeam={goTeam} onSelectPlayer={goPlayer} onChanged={refresh} />
+        ) : view === 'partner' ? (
+          <LegeaPartnerView />
+        ) : view === 'profile' ? (
+          <PlayerProfileView userId={user.id} me={user} onSelectTeam={goTeam} onMeChanged={refresh} onGoDiscover={() => goView('discover')} />
         ) : view === 'referrals' ? (
-          <ReferralsView user={user} onUpgrade={() => setUpgradeOpen(true)} />
+          <ReferralsView user={user} />
         ) : view === 'admin' ? (
           <AdminView />
         ) : null}
       </main>
 
-      <Footer onLegal={setLegalPage} />
-      <BottomNav view={view} setView={(v) => { setSelectedTeamId(null); setView(v) }} isPro={isPro} isAdmin={user.is_admin} />
-      <UpgradeDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} onSuccess={() => { setUpgradeOpen(false); refresh() }} />
+      <Footer onLegal={setLegalPage} onPartner={() => goView('partner')} />
+      <BottomNav view={view} setView={goView} />
       <LegalDialog page={legalPage} onClose={() => setLegalPage(null)} />
       <Toaster theme="dark" position="top-center" richColors />
     </div>
@@ -261,7 +272,7 @@ const AuthDialog = ({ open, onOpenChange, onSuccess }) => {
           <div className="mb-2 flex items-center gap-2">
             <img src="/logo.png" alt="FOOTUP" className="h-8 w-auto" />
           </div>
-          <DialogTitle className="text-2xl">{mode === 'login' ? 'Welcome back, captain' : 'Create your captain account'}</DialogTitle>
+          <DialogTitle className="text-2xl">{mode === 'login' ? 'Welcome back' : 'Create your player account'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           {mode === 'register' && (
@@ -301,11 +312,10 @@ const AuthDialog = ({ open, onOpenChange, onSuccess }) => {
 }
 
 // -------- Layout: TopBar + BottomNav --------
-const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }) => {
+const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onSelectPlayer, pendingCount }) => {
   const [searchOpen, setSearchOpen] = useState(false)
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
-  const isPro = user?.plan === 'pro'
   useEffect(() => {
     if (!searchOpen) return
     const t = setTimeout(async () => {
@@ -328,31 +338,29 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
             { id:'feed', l:'Feed', i:Sparkles },
             { id:'leaderboard', l:'Ranking', i:BarChart3 },
             { id:'matches', l:'Matches', i:Flag },
-            { id:'myteam', l:'Profile', i:Shield },
-            { id:'pricing', l:'PRO', i:Gem },
+            { id:'discover', l:'Discover', i:Compass },
+            { id:'myteam', l:'Club', i:Shield, dot: pendingCount > 0 },
+            { id:'partner', l:'LEGEA', i:Shirt },
           ].map(t => (
-            <button key={t.id} onClick={() => setView(t.id)} className={'flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ' + (view === t.id ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white')}>
-              <t.i className="h-4 w-4" /> {t.l}
+            <button key={t.id} data-testid={`nav-${t.id}`} onClick={() => setView(t.id)} title={t.l} className={'relative flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium transition ' + (view === t.id ? 'bg-white/10 text-white' : 'text-slate-300 hover:text-white')}>
+              <t.i className="h-4 w-4" /> <span className="hidden lg:inline">{t.l}</span>
+              {t.dot && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-400" />}
             </button>
           ))}
           {user?.is_admin && (
             <button onClick={() => setView('admin')} className={'flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ' + (view === 'admin' ? 'bg-white/10 text-white' : 'text-amber-300 hover:text-white')}>
-              <ShieldCheck className="h-4 w-4" /> Admin
+              <ShieldCheck className="h-4 w-4" /> <span className="hidden lg:inline">Admin</span>
             </button>
           )}
         </nav>
         <div className="flex items-center gap-2">
-          {!isPro && (
-            <Button onClick={onUpgrade} size="sm" className="hidden rounded-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/20 hover:opacity-90 md:inline-flex">
-              <Gem className="mr-1.5 h-3.5 w-3.5" /> PRO soon
-            </Button>
-          )}
-          {isPro && <ProBadge small />}
-          <Button size="icon" variant="ghost" onClick={() => setSearchOpen(true)} className="rounded-full hover:bg-white/10"><Search className="h-4 w-4" /></Button>
-          <Avatar className="h-9 w-9 border border-white/10">
-            <AvatarImage src={team?.logo_url || user?.avatar_url} />
-            <AvatarFallback className="bg-emerald-500/20 text-emerald-300 text-sm font-bold">{(user?.name || 'U')[0]?.toUpperCase()}</AvatarFallback>
-          </Avatar>
+          <Button size="icon" variant="ghost" aria-label="Search" onClick={() => setSearchOpen(true)} className="rounded-full hover:bg-white/10"><Search className="h-4 w-4" /></Button>
+          <button data-testid="nav-profile" onClick={() => setView('profile')} aria-label="My player profile" className={'rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ' + (view === 'profile' ? 'ring-2 ring-emerald-400' : '')}>
+            <Avatar className="h-9 w-9 border border-white/10">
+              <AvatarImage src={user?.avatar_url} />
+              <AvatarFallback className="bg-emerald-500/20 text-emerald-300 text-sm font-bold">{(user?.name || 'U')[0]?.toUpperCase()}</AvatarFallback>
+            </Avatar>
+          </button>
           <Button size="icon" variant="ghost" onClick={onLogout} className="rounded-full hover:bg-white/10"><LogOut className="h-4 w-4" /></Button>
         </div>
       </div>
@@ -365,10 +373,9 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
               <button key={t.id} onClick={() => { onSelectTeam(t.id); setSearchOpen(false) }} className="flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-white/5">
                 <div className="relative grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 text-white font-bold">
                   {t.name[0]}
-                  {t.plan === 'pro' && <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-gradient-to-br from-amber-300 to-yellow-500"><Gem className="h-2.5 w-2.5 text-slate-950" /></span>}
                 </div>
                 <div className="flex-1">
-                  <div className="text-sm font-bold flex items-center gap-1">{t.name}{t.plan === 'pro' && <Gem className="h-3 w-3 text-amber-400" />}</div>
+                  <div className="text-sm font-bold flex items-center gap-1">{t.name}</div>
                   <div className="text-xs text-slate-400">{t.city} · Div {t.division.division}</div>
                 </div>
                 <Badge className={'bg-gradient-to-r text-white ' + DIVISION_COLORS[t.division.division]}>{t.rating}</Badge>
@@ -382,14 +389,14 @@ const TopBar = ({ user, team, view, setView, onLogout, onSelectTeam, onUpgrade }
   )
 }
 
-const BottomNav = ({ view, setView, isPro, isAdmin }) => (
+const BottomNav = ({ view, setView }) => (
   <nav className="fixed bottom-3 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-slate-950/80 p-1.5 shadow-2xl shadow-black/50 backdrop-blur-xl md:hidden">
     {[
       { id:'home', i:Home, l:'Home' },
       { id:'challenges', i:Swords, l:'Play' },
-      { id:'tournaments', i:Trophy, l:'Cups' },
+      { id:'discover', i:Compass, l:'Discover' },
       { id:'feed', i:Sparkles, l:'Feed' },
-      { id:'myteam', i:Shield, l:'Team' },
+      { id:'myteam', i:Shield, l:'Club' },
     ].map(t => (
       <button key={t.id} onClick={() => setView(t.id)} className={'group flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl transition ' + (view === t.id ? 'bg-gradient-to-br from-emerald-500 to-cyan-500 text-slate-950' : 'text-slate-400')}>
         <t.i className="h-5 w-5" />
@@ -399,15 +406,7 @@ const BottomNav = ({ view, setView, isPro, isAdmin }) => (
   </nav>
 )
 
-// -------- PRO BADGE --------
-const ProBadge = ({ small }) => (
-  <div className={'inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/30 ' + (small ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm')}>
-    <Gem className={small ? 'h-3 w-3' : 'h-3.5 w-3.5'} /> PRO
-  </div>
-)
-const PlanBadge = ({ plan }) => plan === 'pro' ? <ProBadge small /> : (
-  <span className="inline-flex items-center rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-bold text-slate-300">FREE</span>
-)
+// -------- BADGES --------
 const FounderBadge = () => (
   <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-fuchsia-500/20 to-purple-500/20 border border-fuchsia-500/40 px-2 py-0.5 text-xs font-bold text-fuchsia-300">
     <Star className="h-3 w-3" /> Founder
@@ -569,12 +568,42 @@ const ComposerDialog = ({ open, onOpenChange, onDone }) => {
 }
 
 // -------- MY TEAM --------
-const MyTeamView = ({ user, team, onTeamCreated, onSelectTeam, onUpgrade }) => {
-  if (!team) return <CreateTeamForm onDone={onTeamCreated} />
+const MyTeamView = ({ user, team, onTeamCreated, onSelectTeam, onSelectPlayer, onGoDiscover, onGoPartner }) => {
+  const [mode, setMode] = useState('choose')
+  if (!team) {
+    if (mode === 'create') return (
+      <div className="space-y-4">
+        <Button variant="ghost" onClick={() => setMode('choose')} className="text-slate-300 hover:text-white"><ChevronRight className="h-4 w-4 rotate-180" /> Back</Button>
+        <CreateTeamForm onDone={onTeamCreated} />
+      </div>
+    )
+    return (
+      <div className="mx-auto max-w-3xl space-y-6" data-testid="no-club-view">
+        <div className="text-center">
+          <FreeAgentBadge />
+          <h1 className="mt-3 text-4xl font-black">You're not in a club yet</h1>
+          <p className="mt-2 text-slate-300">Join an existing squad as a player, or found your own club and become its captain.</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <button data-testid="choose-join-club" onClick={onGoDiscover} className="group rounded-3xl border border-white/10 bg-gradient-to-br from-sky-500/15 to-transparent p-6 text-left transition hover:border-sky-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
+            <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-sky-500/20 text-sky-200"><Compass className="h-6 w-6" /></div>
+            <div className="text-xl font-black text-white">Join a club</div>
+            <div className="mt-1 text-sm text-slate-300">Browse clubs that are recruiting and send a request. The captain decides.</div>
+            <div className="mt-4 inline-flex items-center gap-1 text-sm font-bold text-sky-200">Discover clubs <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" /></div>
+          </button>
+          <button data-testid="choose-create-club" onClick={() => setMode('create')} className="group rounded-3xl border border-white/10 bg-gradient-to-br from-amber-500/15 to-transparent p-6 text-left transition hover:border-amber-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
+            <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-amber-500/20 text-amber-200"><Crown className="h-6 w-6" /></div>
+            <div className="text-xl font-black text-white">Create a club</div>
+            <div className="mt-1 text-sm text-slate-300">Found your team, design the kit, recruit players and climb the divisions as captain.</div>
+            <div className="mt-4 inline-flex items-center gap-1 text-sm font-bold text-amber-200">Become captain <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" /></div>
+          </button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="space-y-4">
-      <ReferralInline user={user} />
-      <TeamPage teamId={team.id} me={user} myTeam={team} onFollowChanged={()=>{}} onUpgrade={onUpgrade} embedded />
+      <TeamPage teamId={team.id} me={user} myTeam={team} onFollowChanged={onTeamCreated} onSelectPlayer={onSelectPlayer} onGoPartner={onGoPartner} embedded />
     </div>
   )
 }
@@ -596,8 +625,8 @@ const CreateTeamForm = ({ onDone }) => {
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-6">
-        <h1 className="text-4xl font-black">Create your team</h1>
-        <p className="mt-1 text-slate-400">You are the captain. Choose wisely — this is your team's identity.</p>
+        <h1 className="text-4xl font-black">Create your club</h1>
+        <p className="mt-1 text-slate-300">You will be the captain. Players can then request to join your club. You can design the full kit later in the Kit tab.</p>
       </div>
       <Card className="rounded-3xl border-white/10 bg-white/[.03] p-6 backdrop-blur">
         <div className="grid gap-4 md:grid-cols-2">
@@ -648,10 +677,11 @@ const Field = ({ label, children }) => (
 )
 
 // -------- TEAM PAGE --------
-const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embedded }) => {
+const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onSelectPlayer, onGoPartner, embedded }) => {
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('overview')
   const [addPlayerOpen, setAddPlayerOpen] = useState(false)
+  const [joinOpen, setJoinOpen] = useState(false)
 
   const load = async () => {
     try { const d = await api('/teams/' + teamId); setData(d) } catch {}
@@ -660,7 +690,17 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
   if (!data) return <SkeletonPost />
 
   const t = data.team
-  const isMine = me?.id === t.captain_id
+  const myRole = data.my_role
+  const isMine = myRole === 'captain'
+  const isMember = myRole === 'captain' || myRole === 'player'
+  const pendingReq = data.my_pending_request
+  const reload = () => { load(); onFollowChanged?.() }
+  const cancelJoin = async () => {
+    try { await api(`/join-requests/${pendingReq.id}/cancel`, { method:'POST' }); toast.success('Request cancelled'); reload() } catch (e) { toast.error(e.message) }
+  }
+  const toggleRecruiting = async () => {
+    try { await api('/teams/' + t.id, { method:'PUT', body: JSON.stringify({ recruiting: !t.recruiting }) }); toast.success(!t.recruiting ? 'Recruiting is on' : 'Recruiting is off'); load() } catch (e) { toast.error(e.message) }
+  }
   const isFollowing = (t.followers || []).includes(me?.id)
   const winPct = t.matches_played ? Math.round((t.wins / t.matches_played) * 100) : 0
   const gd = (t.goals_for || 0) - (t.goals_against || 0)
@@ -697,8 +737,9 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
                 </Badge>
                 <Badge variant="outline" className="border-white/20 bg-black/40 text-white backdrop-blur">{t.football_type === 'both' ? '5 & 7-a-side' : `${t.football_type}-a-side`}</Badge>
                 <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300"><TrendingUp className="mr-1 h-3 w-3" /> {t.rating} ELO</Badge>
-                <PlanBadge plan={t.plan} />
                 {t.is_founder && <FounderBadge />}
+                {t.recruiting && <Badge className="border border-emerald-400/40 bg-emerald-500/20 text-emerald-100">Recruiting</Badge>}
+                {isMember && <RoleBadge role={myRole} small />}
               </div>
               <h1 className="text-3xl font-black text-white md:text-4xl">{t.name}</h1>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300">
@@ -710,11 +751,23 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
               </div>
             </div>
           </div>
-          {!isMine && me && (
-            <Button onClick={follow} className={'rounded-full font-bold transition focus-visible:ring-2 focus-visible:ring-white ' + (isFollowing ? 'border border-white/60 bg-white/10 text-white hover:bg-white hover:text-slate-950' : 'bg-white text-slate-950 hover:bg-slate-100')}>
-              {isFollowing ? 'Following' : 'Follow'}
-            </Button>
-          )}
+          <div className="flex flex-col items-end gap-2 md:flex-row">
+            {myRole === 'free_agent' && (pendingReq ? (
+              <Button data-testid="team-cancel-request" onClick={cancelJoin} className="rounded-full border border-amber-300/70 bg-amber-500/20 font-bold text-amber-100 hover:bg-amber-500/40"><Clock className="mr-1.5 h-4 w-4" /> Request pending · Cancel</Button>
+            ) : t.recruiting ? (
+              <Button data-testid="team-request-join" onClick={() => setJoinOpen(true)} className="rounded-full bg-emerald-500 font-bold text-slate-950 hover:bg-emerald-400"><UserPlus className="mr-1.5 h-4 w-4" /> Request to join</Button>
+            ) : null)}
+            {isMine && (
+              <Button data-testid="toggle-recruiting" onClick={toggleRecruiting} className={'rounded-full font-bold ' + (t.recruiting ? 'border border-white/60 bg-white/10 text-white hover:bg-white hover:text-slate-950' : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400')}>
+                <UserPlus className="mr-1.5 h-4 w-4" /> {t.recruiting ? 'Close recruiting' : 'Open recruiting'}
+              </Button>
+            )}
+            {!isMember && me && (
+              <Button onClick={follow} className={'rounded-full font-bold transition focus-visible:ring-2 focus-visible:ring-white ' + (isFollowing ? 'border border-white/60 bg-white/10 text-white hover:bg-white hover:text-slate-950' : 'bg-white text-slate-950 hover:bg-slate-100')}>
+                {isFollowing ? 'Following' : 'Follow'}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -736,13 +789,14 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex w-full flex-wrap gap-1 rounded-2xl bg-white/5 p-1 md:inline-flex md:w-auto">
           <TabsTrigger value="overview" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Overview</TabsTrigger>
-          <TabsTrigger value="roster" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Roster</TabsTrigger>
+          <TabsTrigger value="roster" data-testid="tab-roster" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Squad</TabsTrigger>
+          <TabsTrigger value="kit" data-testid="tab-kit" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial"><Shirt className="mr-1 h-3 w-3" /> Kit</TabsTrigger>
           <TabsTrigger value="posts" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Posts</TabsTrigger>
           <TabsTrigger value="gallery" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Gallery</TabsTrigger>
           <TabsTrigger value="history" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Matches</TabsTrigger>
           <TabsTrigger value="achievements" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">Trophies</TabsTrigger>
           <TabsTrigger value="advanced" className="flex-1 rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-950 md:flex-initial">
-            <Gem className="mr-1 h-3 w-3 text-amber-400" /> Advanced
+            <LineChartIcon className="mr-1 h-3 w-3" /> Stats
           </TabsTrigger>
         </TabsList>
 
@@ -786,8 +840,12 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
           </div>
         </TabsContent>
 
-        <TabsContent value="roster" className="mt-4 space-y-3">
-          {isMine && <Button onClick={() => setAddPlayerOpen(true)} className="rounded-xl bg-white/10 hover:bg-white/20"><UserPlus className="mr-2 h-4 w-4" /> Add player</Button>}
+        <TabsContent value="roster" className="mt-4 space-y-5">
+          <ClubMembersPanel teamId={t.id} members={data.members || []} myRole={myRole} meId={me?.id} onChanged={reload} onSelectPlayer={onSelectPlayer} />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2"><Users className="h-4 w-4 text-emerald-300" /><h3 className="text-sm font-black uppercase tracking-wide">Roster & player stats</h3></div>
+            {isMine && <Button onClick={() => setAddPlayerOpen(true)} className="rounded-xl border border-white/30 bg-white/10 text-white hover:bg-white hover:text-slate-950"><UserPlus className="mr-2 h-4 w-4" /> Add guest player</Button>}
+          </div>
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {data.players.map(p => <PlayerCard key={p.id} p={p} />)}
             {data.players.length === 0 && <div className="col-span-full rounded-2xl border border-dashed border-white/10 p-8 text-center text-slate-500">No players yet.</div>}
@@ -817,7 +875,11 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
         </TabsContent>
 
         <TabsContent value="advanced" className="mt-4">
-          <AdvancedStatsTab teamId={t.id} isPro={t.plan === 'pro'} onUpgrade={onUpgrade} canUpgrade={isMine} />
+          <AdvancedStatsTab teamId={t.id} />
+        </TabsContent>
+
+        <TabsContent value="kit" className="mt-4">
+          <KitTab team={t} canEdit={isMine} onSaved={load} />
         </TabsContent>
 
         <TabsContent value="gallery" className="mt-4">
@@ -828,6 +890,7 @@ const TeamPage = ({ teamId, onBack, me, myTeam, onFollowChanged, onUpgrade, embe
           <TeamAchievementsTab team={t} />
         </TabsContent>
       </Tabs>
+      <JoinRequestDialog open={joinOpen} onOpenChange={setJoinOpen} club={t} me={me} onDone={reload} />
     </div>
   )
 }
@@ -916,7 +979,7 @@ const AddPlayerDialog = ({ open, onOpenChange, teamId, onDone }) => {
 }
 
 // -------- CHALLENGES --------
-const ChallengesView = ({ team, onNeedTeam }) => {
+const ChallengesView = ({ team, isCaptain, onNeedTeam }) => {
   const [challenges, setChallenges] = useState([])
   const [open, setOpen] = useState(false)
   const load = async () => { try { const { challenges } = await api('/challenges'); setChallenges(challenges) } catch {} }
@@ -928,12 +991,15 @@ const ChallengesView = ({ team, onNeedTeam }) => {
           <h1 className="text-3xl font-black">Challenges</h1>
           <p className="text-sm text-slate-400">Open match requests from teams across the network.</p>
         </div>
-        <Button onClick={() => team ? setOpen(true) : onNeedTeam()} className="rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90">
-          <Plus className="mr-1 h-4 w-4" /> New challenge
-        </Button>
+        {(!team || isCaptain) && (
+          <Button onClick={() => team ? setOpen(true) : onNeedTeam()} className="rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90">
+            <Plus className="mr-1 h-4 w-4" /> New challenge
+          </Button>
+        )}
       </div>
+      {team && !isCaptain && <div className="rounded-xl border border-white/10 bg-white/[.03] p-3 text-sm text-slate-300"><Crown className="mr-1.5 inline h-4 w-4 text-amber-300" /> Only your club captain can publish or accept challenges.</div>}
       <div className="grid gap-3 md:grid-cols-2">
-        {challenges.map(c => <ChallengeCard key={c.id} c={c} myTeamId={team?.id} onAccepted={load} />)}
+        {challenges.map(c => <ChallengeCard key={c.id} c={c} myTeamId={team?.id} canAccept={!!team && isCaptain} onAccepted={load} />)}
         {challenges.length === 0 && <EmptyState icon={Swords} title="No open challenges" desc="Post the first one." />}
       </div>
       <ChallengeDialog open={open} onOpenChange={setOpen} onDone={load} />
@@ -941,7 +1007,7 @@ const ChallengesView = ({ team, onNeedTeam }) => {
   )
 }
 
-const ChallengeCard = ({ c, myTeamId, onAccepted }) => {
+const ChallengeCard = ({ c, myTeamId, canAccept, onAccepted }) => {
   const isMine = c.team_id === myTeamId
   const [busy, setBusy] = useState(false)
   const accept = async () => {
@@ -965,7 +1031,7 @@ const ChallengeCard = ({ c, myTeamId, onAccepted }) => {
         <div className="flex items-center gap-2 text-slate-300"><MapPin className="h-3.5 w-3.5" /> {c.city} {c.facility && `· ${c.facility}`}</div>
         {c.notes && <div className="mt-2 rounded-lg bg-white/5 p-2 text-xs text-slate-300">{c.notes}</div>}
       </div>
-      {c.status === 'open' && !isMine && (
+      {c.status === 'open' && !isMine && canAccept && (
         <Button onClick={accept} disabled={busy} className="mt-4 w-full rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90">
           {busy ? 'Accepting…' : <><Swords className="mr-2 h-4 w-4" /> Accept challenge</>}
         </Button>
@@ -1019,21 +1085,21 @@ const ChallengeDialog = ({ open, onOpenChange, onDone }) => {
 }
 
 // -------- MATCHES --------
-const MatchesView = ({ team, onSelectTeam }) => {
+const MatchesView = ({ team, isCaptain, onSelectTeam }) => {
   const [matches, setMatches] = useState([])
   const load = async () => { try { const { matches } = await api('/matches'); setMatches(matches) } catch {} }
   useEffect(() => { load() }, [])
-  if (!team) return <EmptyState icon={Flag} title="Create your team first" desc="You need a team to manage matches." />
+  if (!team) return <EmptyState icon={Flag} title="Join or create a club first" desc="You need a club to see its matches." />
   return (
     <div className="space-y-4">
       <h1 className="text-3xl font-black">Matches</h1>
       {matches.length === 0 && <EmptyState icon={Flag} title="No matches yet" desc="Accept a challenge to get started." />}
-      {matches.map(m => <MatchCard key={m.id} m={m} myTeamId={team.id} onSelectTeam={onSelectTeam} onReload={load} />)}
+      {matches.map(m => <MatchCard key={m.id} m={m} myTeamId={team.id} canConfirm={isCaptain} onSelectTeam={onSelectTeam} onReload={load} />)}
     </div>
   )
 }
 
-const MatchCard = ({ m, myTeamId, onSelectTeam, onReload }) => {
+const MatchCard = ({ m, myTeamId, canConfirm, onSelectTeam, onReload }) => {
   const [open, setOpen] = useState(false)
   const [f, setF] = useState({ score_home:'', score_away:'' })
   const [busy, setBusy] = useState(false)
@@ -1071,7 +1137,7 @@ const MatchCard = ({ m, myTeamId, onSelectTeam, onReload }) => {
       <div className="mt-4 flex items-center justify-between">
         <Badge className={'capitalize ' + statusColor}>{m.status}</Badge>
         <div className="text-xs text-slate-400">{m.date} {m.time} · {m.facility}</div>
-        {m.status !== 'confirmed' && <Button onClick={() => setOpen(true)} size="sm" className="rounded-full bg-white/10 hover:bg-white/20">{myConf ? 'Update result' : 'Confirm result'}</Button>}
+        {m.status !== 'confirmed' && canConfirm && <Button onClick={() => setOpen(true)} size="sm" className="rounded-full bg-white/10 hover:bg-white/20">{myConf ? 'Update result' : 'Confirm result'}</Button>}
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -1191,7 +1257,7 @@ const LeaderboardView = ({ onSelectTeam }) => {
               <div className={'grid h-10 w-10 place-items-center rounded-xl font-black ' + (i < 3 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-slate-950' : 'bg-white/5 text-slate-300')}>{i + 1}</div>
               <div className="grid h-11 w-11 place-items-center rounded-xl font-bold text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
               <div className="flex-1">
-                <div className="font-bold flex items-center gap-1.5">{t.name}{t.plan === 'pro' && <Gem className="h-3 w-3 text-amber-400" />}</div>
+                <div className="font-bold flex items-center gap-1.5">{t.name}</div>
                 <div className="text-xs text-slate-400">{t.city} · {t.wins}W {t.draws}D {t.losses}L · OVR {t.reputation?.overall || '—'}</div>
               </div>
               <Badge className={'bg-gradient-to-r text-white ' + DIVISION_COLORS[t.division.division]}>D{t.division.division}</Badge>
@@ -1325,199 +1391,20 @@ const EmptyState = ({ icon: I, title, desc, action }) => (
     </div>
   </div>
 )
-// -------- PRICING VIEW --------
-const FREE_FEATURES = [
-  'Create team profile',
-  'Team logo & photo',
-  'Manage full roster',
-  'Follow other teams',
-  'Social feed access',
-  'Post, like & comment',
-  'Search teams & players',
-  'Match challenges',
-  'ELO ranking',
-  '10 divisions',
-  'Join public tournaments',
-  'Basic team statistics',
-]
-const PRO_FEATURES = [
-  'Everything in FREE',
-  'Advanced statistics dashboard',
-  'Complete match history',
-  'Season stats & evolution graph',
-  'Player contribution analysis',
-  'Goal trends & win/loss charts',
-  'Premium team customization',
-  'Custom banner & themes',
-  'Priority placement in search',
-  'Featured team section',
-  'PRO badge on your profile',
-  'Export team stats to PDF',
-  'Season reports',
-  'Advanced leaderboard filters',
-  'No advertisements',
-  'Early access to new features',
-  'Exclusive PRO badges',
-]
-
-const PricingView = ({ user, onUpgrade, onRefresh }) => {
-  const isPro = user.plan === 'pro'
-  const renew = user.pro_until ? new Date(user.pro_until).toLocaleDateString() : null
-  const cancel = async () => {
-    try { const r = await api('/subscription/cancel', {method:'POST'}); toast.success(r.message); onRefresh?.() } catch (e) { toast.error(e.message) }
-  }
-  return (
-    <div className="space-y-8">
-      <div className="text-center">
-        <Badge className="mb-3 rounded-full bg-amber-500/15 px-4 py-1.5 text-amber-300 border border-amber-500/30 backdrop-blur">
-          <Gem className="mr-1.5 h-3.5 w-3.5" /> FOOTUP PRO · Team Season Pass
-        </Badge>
-        <h1 className="text-4xl font-black md:text-5xl">Elevate your team's <span className="bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">season</span></h1>
-        <p className="mx-auto mt-3 max-w-xl text-slate-400">FOOTUP is free forever. The Team Season Pass is an optional yearly membership from FOOTUP ASD that unlocks premium tools for teams who want more from their season.</p>
-        <div className="mx-auto mt-3 max-w-xl text-xs text-slate-500">The Team Season Pass is a digital service offered by FOOTUP ASD to enhance amateur football participation. It is not a commercial SaaS product.</div>
-      </div>
-
-      <div className="grid gap-5 md:grid-cols-2">
-        {/* FREE */}
-        <motion.div initial={{y:20,opacity:0}} animate={{y:0,opacity:1}}>
-          <Card className={'rounded-3xl border-white/10 bg-white/[.03] p-7 backdrop-blur ' + (!isPro ? 'ring-2 ring-emerald-500/40' : '')}>
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <div className="text-sm font-bold text-slate-400">FOOTUP</div>
-                <div className="text-3xl font-black">Free Membership</div>
-              </div>
-              {!isPro && <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Current plan</Badge>}
-            </div>
-            <div className="mb-5">
-              <div className="text-4xl font-black">€0<span className="text-lg font-normal text-slate-400">/season</span></div>
-              <div className="text-xs text-slate-500">Open to every amateur team, forever.</div>
-            </div>
-            <ul className="space-y-2.5">
-              {FREE_FEATURES.map(f => (
-                <li key={f} className="flex items-start gap-2 text-sm text-slate-200">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /> {f}
-                </li>
-              ))}
-            </ul>
-            <Button disabled className="mt-6 w-full rounded-xl bg-white/5 text-slate-400">Current plan</Button>
-          </Card>
-        </motion.div>
-
-        {/* PRO */}
-        <motion.div initial={{y:20,opacity:0}} animate={{y:0,opacity:1}} transition={{delay:.1}}>
-          <Card className={'relative overflow-hidden rounded-3xl border-amber-500/40 bg-gradient-to-br from-amber-500/15 via-yellow-500/10 to-transparent p-7 backdrop-blur ' + (isPro ? 'ring-2 ring-amber-500/60' : '')}>
-            <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-amber-500/20 blur-3xl" />
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-bold text-amber-300"><Gem className="h-4 w-4" /> FOOTUP PRO</div>
-                <div className="text-3xl font-black bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">Team Season Pass</div>
-              </div>
-              {isPro ? <Badge className="bg-amber-500/25 text-amber-200 border border-amber-500/40">Active</Badge> : <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Recommended</Badge>}
-            </div>
-            <div className="mb-5">
-              <div className="text-4xl font-black">€9.99<span className="text-lg font-normal text-slate-300">/season</span></div>
-              <div className="text-xs text-amber-200/80">Per team · Runs for one full football season</div>
-            </div>
-            <ul className="space-y-2.5">
-              {PRO_FEATURES.map(f => (
-                <li key={f} className="flex items-start gap-2 text-sm text-slate-100">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /> {f}
-                </li>
-              ))}
-            </ul>
-            {isPro ? (
-              <div className="mt-6 space-y-2">
-                <div className="rounded-xl bg-black/30 p-3 text-center text-sm">
-                  <div className="text-xs text-slate-400">Season Pass renews</div>
-                  <div className="font-bold text-white">{renew}</div>
-                </div>
-                <Button onClick={cancel} variant="outline" className="w-full rounded-xl border border-white/60 bg-white/5 text-white transition hover:bg-white hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-white">Stop automatic renewal</Button>
-              </div>
-            ) : (
-              <Button onClick={onUpgrade} className="mt-6 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 shadow-lg shadow-amber-500/30 hover:opacity-90">
-                <Bell className="mr-2 h-4 w-4" /> Join the waitlist
-              </Button>
-            )}
-            <div className="mt-3 text-center text-[10px] text-amber-200/70">Offered by FOOTUP ASD · Amateur Sports Association · Launching Q1</div>
-          </Card>
-        </motion.div>
-      </div>
-
-      <Card className="rounded-3xl border-white/10 bg-white/[.03] p-6 backdrop-blur">
-        <div className="mb-4 flex items-center gap-2"><Gift className="h-5 w-5 text-fuchsia-400" /><h2 className="text-xl font-black">Earn Season Pass access for free</h2></div>
-        <p className="text-sm text-slate-400">Invite other teams to join the FOOTUP community. Grow the network, earn free Season Pass months.</p>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="text-2xl font-black">5 invites</div><div className="text-sm text-emerald-300">+30 days Season Pass</div></div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="text-2xl font-black">20 invites</div><div className="text-sm text-amber-300">+90 days Season Pass</div></div>
-        </div>
-      </Card>
-
-      <div className="rounded-2xl border border-white/10 bg-white/[.02] p-5 text-xs leading-relaxed text-slate-400">
-        <div className="mb-1 font-bold text-slate-200">About FOOTUP ASD</div>
-        FOOTUP is a project of FOOTUP ASD, an amateur sports association. The Team Season Pass is a digital service that supports the ecosystem and unlocks premium features for participating teams. FOOTUP ASD remains the sole owner of the brand, community, tournaments, ranking system, database and all intellectual property on the platform.
-      </div>
-    </div>
-  )
-}
-
-// -------- UPGRADE DIALOG (Stripe placeholder) --------
-const UpgradeDialog = ({ open, onOpenChange, onSuccess }) => {
-  const [email, setEmail] = useState('')
-  const [joined, setJoined] = useState(false)
-  const notify = () => {
-    setJoined(true)
-    toast.success("You're on the waitlist! We'll ping you at launch.")
-    setTimeout(() => { setJoined(false); onOpenChange(false) }, 1600)
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden border-amber-500/40 bg-gradient-to-br from-slate-950 via-slate-950 to-amber-950/20 text-white sm:max-w-md">
-        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-amber-500/20 blur-3xl" />
-        <DialogHeader>
-          <div className="mx-auto mb-2 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 shadow-2xl shadow-amber-500/40">
-            <Gem className="h-7 w-7 text-slate-950" />
-          </div>
-          <div className="text-center text-xs uppercase tracking-widest text-amber-200/80">FOOTUP PRO</div>
-          <DialogTitle className="text-center text-2xl">Team Season Pass — Coming soon</DialogTitle>
-        </DialogHeader>
-        <div className="mt-1 text-center">
-          <Badge className="rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/30">Launching Q1</Badge>
-          <div className="mt-3 text-sm text-slate-300">Advanced stats, priority in search, PRO badge, no ads. The Team Season Pass will unlock the full FOOTUP experience for competitive teams.</div>
-        </div>
-        <div className="mt-4 space-y-2 rounded-2xl bg-white/5 p-4">
-          {['Advanced stats & charts', 'Priority in search', 'PRO badge on profile', 'No ads · Early access'].map(f => (
-            <div key={f} className="flex items-center gap-2 text-sm"><Check className="h-4 w-4 text-amber-300" /> {f}</div>
-          ))}
-        </div>
-        <Button onClick={notify} disabled={joined} className="mt-4 w-full rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 hover:opacity-90">
-          {joined ? <><Check className="mr-2 h-4 w-4" /> You're on the list</> : <><Bell className="mr-2 h-4 w-4" /> Notify me at launch</>}
-        </Button>
-        <div className="text-center text-[10px] text-slate-500">A digital service by FOOTUP ASD — Amateur Sports Association. Payments open at launch.</div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 // -------- REFERRALS --------
 const ReferralInline = ({ user }) => {
   const [data, setData] = useState(null)
   useEffect(() => { api('/referrals/me').then(setData).catch(()=>{}) }, [])
   if (!data) return null
   const copy = () => { navigator.clipboard.writeText(data.referral_url); toast.success('Referral link copied!') }
-  const progress = data.next_milestone ? Math.round((data.referrals_count / data.next_milestone) * 100) : 100
   return (
     <Card className="relative overflow-hidden rounded-3xl border-fuchsia-500/30 bg-gradient-to-br from-fuchsia-500/15 via-purple-500/10 to-transparent p-5 backdrop-blur">
       <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-fuchsia-500/20 blur-3xl" />
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="mb-1 flex items-center gap-2 text-sm font-bold text-fuchsia-300"><Gift className="h-4 w-4" /> Referral rewards</div>
-          <div className="text-lg font-black">Invite teams. Earn free PRO.</div>
-          <div className="text-xs text-slate-400">Your code: <span className="font-mono font-bold text-fuchsia-300">{data.referral_code}</span> · {data.referrals_count} invited{data.next_milestone && ` · ${data.next_milestone - data.referrals_count} to next reward`}</div>
-          {data.next_milestone && (
-            <div className="mt-2 h-2 w-64 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-gradient-to-r from-fuchsia-400 to-purple-500 transition-all" style={{ width: progress + '%' }} />
-            </div>
-          )}
+          <div className="mb-1 flex items-center gap-2 text-sm font-bold text-fuchsia-300"><Gift className="h-4 w-4" /> Invite friends</div>
+          <div className="text-lg font-black">Grow your football community</div>
+          <div className="text-xs text-slate-300">Your code: <span className="font-mono font-bold text-fuchsia-300">{data.referral_code}</span> · {data.referrals_count} invited</div>
         </div>
         <div className="flex gap-2">
           <Button onClick={copy} className="rounded-full bg-white/10 hover:bg-white/20"><Copy className="mr-1.5 h-3.5 w-3.5" /> Copy link</Button>
@@ -1531,119 +1418,33 @@ const ReferralsView = ({ user }) => <div className="space-y-4"><h1 className="te
 // -------- ADMIN --------
 const AdminView = () => {
   const [stats, setStats] = useState(null)
-  const [proTeams, setProTeams] = useState([])
-  const [subs, setSubs] = useState([])
-  const [grantOpen, setGrantOpen] = useState(false)
-  const load = async () => {
-    try {
-      const s = await api('/admin/stats'); setStats(s)
-      const t = await api('/admin/pro-teams'); setProTeams(t.teams || [])
-      const b = await api('/admin/subscriptions'); setSubs(b.subscriptions || [])
-    } catch (e) { toast.error(e.message) }
-  }
-  useEffect(() => { load() }, [])
+  useEffect(() => { api('/admin/stats').then(setStats).catch(e => toast.error(e.message)) }, [])
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-amber-400" /><h1 className="text-3xl font-black">Admin</h1></div>
-          <p className="text-sm text-slate-400">Platform overview & controls.</p>
-        </div>
-        <Button onClick={() => setGrantOpen(true)} className="rounded-full bg-gradient-to-r from-amber-300 to-yellow-500 font-bold text-slate-950 hover:opacity-90"><Gift className="mr-1.5 h-3.5 w-3.5" /> Grant PRO</Button>
+      <div>
+        <div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-amber-400" /><h1 className="text-3xl font-black">Admin</h1></div>
+        <p className="text-sm text-slate-300">Platform overview.</p>
       </div>
-
       {stats && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <StatCard icon={Users} label="Users" value={stats.users} />
-          <StatCard icon={Shield} label="Teams" value={stats.teams} />
+          <StatCard icon={Shield} label="Clubs" value={stats.teams} accent />
+          <StatCard icon={UserPlus} label="Club members" value={stats.members} />
+          <StatCard icon={Clock} label="Pending requests" value={stats.pending_requests} />
           <StatCard icon={Flag} label="Matches" value={stats.matches} />
-          <StatCard icon={Gem} label="Active PRO" value={stats.pro_active} accent />
-          <StatCard icon={CreditCard} label="Subscriptions" value={stats.subs} />
         </div>
       )}
-
-      <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
-        <div className="mb-3 flex items-center gap-2"><Gem className="h-4 w-4 text-amber-400" /><h3 className="font-bold">PRO teams</h3></div>
-        <div className="space-y-2">
-          {proTeams.map(t => (
-            <div key={t.id} className="flex items-center justify-between rounded-xl bg-white/5 p-3">
-              <div className="flex items-center gap-3">
-                <div className="grid h-9 w-9 place-items-center rounded-lg font-bold text-white" style={{background: `linear-gradient(135deg, ${t.primary_color || '#10b981'}, ${t.secondary_color || '#06b6d4'})`}}>{t.name[0]}</div>
-                <div>
-                  <div className="text-sm font-bold">{t.name}</div>
-                  <div className="text-xs text-slate-400">{t.city} · rating {t.rating}</div>
-                </div>
-              </div>
-              <div className="text-xs text-amber-300">until {t.pro_until ? new Date(t.pro_until).toLocaleDateString() : '—'}</div>
-            </div>
-          ))}
-          {proTeams.length === 0 && <div className="text-sm text-slate-500">No active PRO teams.</div>}
-        </div>
-      </Card>
-
-      <Card className="rounded-2xl border-white/10 bg-white/[.03] p-5">
-        <div className="mb-3 flex items-center gap-2"><CreditCard className="h-4 w-4 text-emerald-400" /><h3 className="font-bold">Subscriptions ({subs.length})</h3></div>
-        <div className="space-y-1 text-sm">
-          {subs.slice(0, 10).map(s => (
-            <div key={s.id} className="flex justify-between rounded-lg bg-white/5 px-3 py-2">
-              <span className="font-mono text-xs text-slate-400">{s.user_id.slice(0, 8)}…</span>
-              <span>€{s.amount} · {s.provider}</span>
-              <Badge className={s.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-500/20 text-slate-300'}>{s.status}</Badge>
-            </div>
-          ))}
-          {subs.length === 0 && <div className="text-sm text-slate-500">No subscriptions yet.</div>}
-        </div>
-      </Card>
-
-      <GrantProDialog open={grantOpen} onOpenChange={setGrantOpen} onDone={load} />
     </div>
-  )
-}
-const GrantProDialog = ({ open, onOpenChange, onDone }) => {
-  const [f, setF] = useState({ user_id:'', days:30 })
-  const [busy, setBusy] = useState(false)
-  const submit = async () => {
-    setBusy(true)
-    try { await api('/admin/grant-pro', { method:'POST', body: JSON.stringify(f) }); toast.success('PRO granted!'); onOpenChange(false); onDone?.() }
-    catch (e) { toast.error(e.message) } finally { setBusy(false) }
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-white/10 bg-slate-950 text-white sm:max-w-md">
-        <DialogHeader><DialogTitle>Grant temporary PRO</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <Field label="User ID"><Input value={f.user_id} onChange={e => setF({...f, user_id:e.target.value})} className="border-white/10 bg-white/5" /></Field>
-          <Field label="Days"><Input type="number" value={f.days} onChange={e => setF({...f, days:+e.target.value})} className="border-white/10 bg-white/5" /></Field>
-          <Button onClick={submit} disabled={busy} className="w-full rounded-xl bg-gradient-to-r from-amber-300 to-yellow-500 font-bold text-slate-950 hover:opacity-90">{busy ? 'Granting…' : 'Grant PRO'}</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   )
 }
 
 // -------- ADVANCED STATS --------
-const AdvancedStatsTab = ({ teamId, isPro, onUpgrade, canUpgrade }) => {
+const AdvancedStatsTab = ({ teamId }) => {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   useEffect(() => {
-    if (!isPro) return
     api(`/teams/${teamId}/advanced-stats`).then(setData).catch(e => setErr(e.message))
-  }, [teamId, isPro])
-
-  if (!isPro) return (
-    <Card className="relative overflow-hidden rounded-3xl border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-transparent p-10 text-center backdrop-blur">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(245,158,11,.15),transparent_60%)]" />
-      <Lock className="mx-auto mb-3 h-10 w-10 text-amber-300" />
-      <div className="text-2xl font-black">Included with the Team Season Pass</div>
-      <p className="mx-auto mt-2 max-w-md text-sm text-slate-300">Complete match history · Season evolution graph · Goal trends · Player contribution analysis · Win/loss breakdown</p>
-      {canUpgrade && (
-        <Button onClick={onUpgrade} className="mt-6 rounded-full bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 font-bold text-slate-950 hover:opacity-90">
-          <Gem className="mr-2 h-4 w-4" /> Activate Season Pass — €9.99/season
-        </Button>
-      )}
-      <div className="mt-3 text-[10px] text-amber-200/70">Offered by FOOTUP ASD · Amateur Sports Association</div>
-    </Card>
-  )
+  }, [teamId])
 
   if (err) return <div className="rounded-2xl border border-white/10 p-5 text-sm text-rose-300">{err}</div>
   if (!data) return <SkeletonPost />
@@ -1716,7 +1517,7 @@ const GoalTrendChart = ({ data }) => {
 }
 
 // -------- HOME DASHBOARD --------
-const HomeDashboard = ({ user, team, onSelectTeam, onGoto, onGoCreate }) => {
+const HomeDashboard = ({ user, team, role, pendingCount, onSelectTeam, onGoto, onGoCreate }) => {
   const [state, setState] = useState({ posts: [], challenges: [], leaderboard: [], matches: [] })
   const [loading, setLoading] = useState(true)
   useEffect(() => {
@@ -1748,14 +1549,21 @@ const HomeDashboard = ({ user, team, onSelectTeam, onGoto, onGoCreate }) => {
             <div className="text-xs font-bold uppercase tracking-widest text-emerald-300">{new Date().toLocaleDateString(undefined, { weekday: 'long' })}</div>
             <h1 className="mt-1 text-3xl font-black md:text-4xl">Welcome back, {user.name.split(' ')[0]}</h1>
             {team ? (
-              <div className="mt-1 text-sm text-slate-300">Captain of <span className="font-bold text-white">{team.name}</span> · Rating {team.rating}</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-200"><RoleBadge role={role} small /> <span>{role === 'captain' ? 'Captain of' : 'Player at'} <span className="font-bold text-white">{team.name}</span> · Rating {team.rating}</span></div>
             ) : (
-              <div className="mt-1 text-sm text-slate-300">You don't have a team yet. Create one to start competing.</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-200"><FreeAgentBadge small /> <span>Join a club or create your own to start competing.</span></div>
+            )}
+            {role === 'captain' && pendingCount > 0 && (
+              <button data-testid="home-pending-requests" onClick={() => onGoto('myteam')} className="mt-3 inline-flex items-center gap-2 rounded-full border border-amber-300/60 bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-100 hover:bg-amber-500/30">
+                <UserPlus className="h-3.5 w-3.5" /> {pendingCount} join request{pendingCount > 1 ? 's' : ''} waiting
+              </button>
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            {!team && <Button onClick={onGoCreate} className="rounded-full bg-white text-slate-950 hover:bg-slate-100"><Plus className="mr-1.5 h-4 w-4" /> Create team</Button>}
-            <Button onClick={() => onGoto('challenges')} className="rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90"><Swords className="mr-1.5 h-4 w-4" /> Find match</Button>
+            {!team && <Button data-testid="home-find-club" onClick={() => onGoto('discover')} className="rounded-full bg-white font-bold text-slate-950 hover:bg-slate-100"><Compass className="mr-1.5 h-4 w-4" /> Find a club</Button>}
+            {!team && <Button onClick={onGoCreate} variant="outline" className="rounded-full border-white/60 bg-transparent font-bold text-white hover:bg-white hover:text-slate-950"><Plus className="mr-1.5 h-4 w-4" /> Create club</Button>}
+            <Button onClick={() => onGoto('profile')} variant="outline" className="rounded-full border-white/60 bg-transparent font-bold text-white hover:bg-white hover:text-slate-950"><Users className="mr-1.5 h-4 w-4" /> My profile</Button>
+            {team && <Button onClick={() => onGoto('challenges')} className="rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 font-bold text-slate-950 hover:opacity-90"><Swords className="mr-1.5 h-4 w-4" /> Find match</Button>}
           </div>
         </div>
       </div>
@@ -1767,7 +1575,7 @@ const HomeDashboard = ({ user, team, onSelectTeam, onGoto, onGoCreate }) => {
             {/* Upcoming Matches */}
             <SectionCard icon={Flag} title="Upcoming matches" cta={team ? { l: 'All', on: () => onGoto('matches') } : null}>
               {upcomingMatches.length === 0 ? (
-                <MiniEmpty icon={Flag} text={team ? "No upcoming matches" : "Create a team to accept challenges"} />
+                <MiniEmpty icon={Flag} text={team ? "No upcoming matches" : "Join or create a club to play matches"} />
               ) : (
                 <div className="space-y-2">
                   {upcomingMatches.map(m => (
@@ -1832,6 +1640,7 @@ const HomeDashboard = ({ user, team, onSelectTeam, onGoto, onGoCreate }) => {
 
           {/* RIGHT COLUMN */}
           <div className="space-y-6">
+            <LegeaPromoCard onOpen={() => onGoto('partner')} />
             {/* Division Ranking */}
             <SectionCard icon={Trophy} title="Division ranking" cta={{ l: 'Full', on: () => onGoto('leaderboard') }}>
               {topTeams.length === 0 ? <MiniEmpty icon={Trophy} text="No teams ranked yet." /> : (
@@ -2043,7 +1852,7 @@ function fmtAgo(d) {
 }
 
 // -------- FOOTER --------
-const Footer = ({ onLegal, landing }) => (
+const Footer = ({ onLegal, landing, onPartner }) => (
   <footer className={'mt-8 border-t border-white/5 ' + (landing ? '' : 'mb-20 md:mb-0')}>
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
@@ -2057,6 +1866,15 @@ const Footer = ({ onLegal, landing }) => (
           <button onClick={() => onLegal('privacy')} className="hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded">Privacy Policy</button>
           <button onClick={() => onLegal('cookies')} className="hover:text-white">Cookie Policy</button>
         </nav>
+      </div>
+      <div className="mt-6 flex flex-col items-center justify-center gap-2 border-t border-white/5 pt-5 md:flex-row md:justify-start">
+        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Technical partner</span>
+        {onPartner ? (
+          <button data-testid="footer-legea" onClick={onPartner} className="rounded font-black italic tracking-tight text-white hover:text-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">LEGEA</button>
+        ) : (
+          <a href={LEGEA_URL} target="_blank" rel="noopener noreferrer" className="rounded font-black italic tracking-tight text-white hover:text-emerald-300">LEGEA</a>
+        )}
+        <span className="text-[10px] text-slate-400">· 103 Color collection</span>
       </div>
       <div className="mt-4 text-center text-[10px] text-slate-600 md:text-left">
         All trademarks, logos, designs, database structures, ranking algorithms, statistics systems and platform contents are the exclusive intellectual property of FOOTUP ASD.
@@ -2072,7 +1890,7 @@ const LEGAL_CONTENT = {
     icon: Shield,
     body: [
       { h: 'Who we are', p: 'FOOTUP is a social platform for amateur 5-a-side and 7-a-side football teams, owned and operated by FOOTUP ASD (Associazione Sportiva Dilettantistica). Our mission is to empower amateur football teams to build their identity, challenge rivals across their city and beyond, climb divisions through a real ELO-based ranking system, and become part of the largest amateur football community.' },
-      { h: 'An amateur sports association', p: 'FOOTUP ASD is an amateur sports association. FOOTUP PRO — the Team Season Pass — is not a commercial SaaS subscription but a premium digital service that supports the association ecosystem and enhances amateur football participation for teams that choose to activate it.' },
+      { h: 'An amateur sports association', p: 'FOOTUP ASD is an amateur sports association. All community features of FOOTUP are free for every player and club.' },
       { h: 'Our vision', p: 'We believe every amateur football team deserves the tools that professional clubs use — team pages, real statistics, competitive rankings and a public identity. FOOTUP is the LinkedIn + Instagram + Faceit for amateur football.' },
       { h: 'Ownership', p: 'FOOTUP ASD is the sole and exclusive owner of the FOOTUP brand, community, tournaments, ranking system, database, trademarks, logos, designs, source code, database structures, ranking algorithms, statistics systems, badges, division architecture and all intellectual property on the platform. User Content remains owned by its authors under the license granted in the Terms of Service.' },
       { h: 'Contact', p: 'For business, legal, press or partnership inquiries please contact us via the official FOOTUP support channel.' },
@@ -2087,9 +1905,9 @@ const LEGAL_CONTENT = {
       { h: '3. Accounts & Teams', p: 'Each user may create one Team as Captain. You are responsible for all activity on your account and for maintaining the confidentiality of your credentials. You agree not to impersonate other individuals or teams.' },
       { h: '4. User Content', p: 'You retain ownership of the content you post (photos, videos, posts, comments, team information). By posting content on FOOTUP you grant FOOTUP ASD a worldwide, non-exclusive, royalty-free license to host, display, reproduce and distribute that content solely for the purpose of operating and promoting the platform.' },
       { h: '5. Prohibited conduct', p: 'You agree not to: (a) publish illegal, harassing, defamatory or hateful content; (b) upload content that infringes third-party intellectual property; (c) manipulate matches, ELO ratings, statistics or leaderboards; (d) attempt to reverse-engineer, scrape or copy the platform, its algorithms or database structures; (e) use the platform for commercial purposes without prior written authorisation.' },
-      { h: '6. Team Season Pass', p: 'FOOTUP is free to use (FOOTUP FREE). The FOOTUP PRO Team Season Pass is an optional digital service offered by FOOTUP ASD at €9.99 per team per season, providing access to premium features for the duration of the season. The Team Season Pass is a member benefit of the FOOTUP ASD ecosystem and is not a commercial software SaaS subscription. It renews automatically at the end of each season unless the automatic renewal is stopped by the Captain; PRO benefits remain active until the end of the current active period. Refunds are handled in accordance with applicable consumer protection law and the internal regulations of FOOTUP ASD.' },
+      { h: '6. Free service & partners', p: 'FOOTUP is free to use for every player and club. FOOTUP does not sell subscriptions. Links to the Technical Partner LEGEA lead to the official LEGEA website; any purchase made there is governed exclusively by the terms of LEGEA.' },
       { h: '7. Match results & ranking', p: 'Match results, ELO ratings, division assignments and leaderboard positions are computed by the platform and are final once confirmed by both team captains. FOOTUP ASD reserves the right to reverse or annul any result found to be fraudulent or in violation of these Terms.' },
-      { h: '8. Suspension & termination', p: 'FOOTUP ASD may suspend or terminate any account that violates these Terms or applicable law, with or without notice. You may delete your account at any time; PRO subscriptions cancelled but pre-paid periods are not refundable.' },
+      { h: '8. Suspension & termination', p: 'FOOTUP ASD may suspend or terminate any account that violates these Terms or applicable law, with or without notice. You may delete your account at any time.' },
       { h: '9. Disclaimer & liability', p: 'The platform is provided "as is" without warranties of any kind. To the maximum extent permitted by law, FOOTUP ASD is not liable for indirect, incidental or consequential damages arising from the use of the platform.' },
       { h: '10. Governing law', p: 'These Terms are governed by the laws of the country where FOOTUP ASD is domiciled. Any dispute shall be subject to the exclusive jurisdiction of the competent courts of that jurisdiction.' },
       { h: '11. Changes', p: 'FOOTUP ASD may amend these Terms at any time. Material changes will be communicated in-app. Continued use of the platform after changes constitutes acceptance.' },
@@ -2117,7 +1935,7 @@ const LEGAL_CONTENT = {
     body: [
       { h: 'What are cookies', p: 'Cookies are small files stored on your device by your browser when you visit a website. They allow us to keep you signed in, remember your preferences and understand how the platform is used.' },
       { h: 'Cookies we use', p: 'Strictly necessary: "footup_token" — an HttpOnly, signed session cookie required to keep you authenticated. Without it, you cannot use the platform. Functional: cookies that remember display preferences (theme, language). Analytics (future): aggregated, privacy-friendly usage analytics may be added; you will be able to opt out.' },
-      { h: 'Third-party cookies', p: 'When FOOTUP PRO Stripe integration is enabled, Stripe will set its own cookies during checkout. We do not use advertising or cross-site tracking cookies.' },
+      { h: 'Third-party cookies', p: 'External partner websites (such as legea.it) may set their own cookies when you visit them. FOOTUP does not use advertising or cross-site tracking cookies.' },
       { h: 'Managing cookies', p: 'You can manage or delete cookies through your browser settings. Disabling the "footup_token" cookie will log you out of FOOTUP.' },
       { h: 'Contact', p: 'For questions regarding this Cookie Policy, contact FOOTUP ASD.' },
     ],

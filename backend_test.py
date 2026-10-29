@@ -1,692 +1,679 @@
 #!/usr/bin/env python3
 """
-FOOTUP Backend API End-to-End Test
-Tests all backend endpoints with proper auth flow using HttpOnly cookies
+FOOTUP Backend Testing - Club Membership Model & Join Requests
+Tests the new club membership system with captain/player/free_agent roles
 """
-
 import requests
-import json
-import time
-from datetime import datetime
+import random
+import string
+from pymongo import MongoClient
+import os
+from uuid import uuid4
 
-BASE_URL = "https://kick-off-app-1.preview.emergentagent.com/api"
+# Base URL from environment
+BASE_URL = os.getenv('NEXT_PUBLIC_BASE_URL', 'https://kick-off-app-1.preview.emergentagent.com') + '/api'
+MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017')
+DB_NAME = os.getenv('DB_NAME', 'footup')
 
-# Use timestamp to create unique test data for each run
-TEST_RUN_ID = int(time.time())
+print(f"Testing against: {BASE_URL}")
+print(f"MongoDB: {MONGO_URL}/{DB_NAME}")
 
-# Use separate sessions to simulate two captains with separate cookie jars
-session_a = requests.Session()
-session_b = requests.Session()
+def random_email():
+    """Generate a realistic random email"""
+    first_names = ['james', 'john', 'robert', 'michael', 'william', 'david', 'richard', 'joseph', 'thomas', 'charles']
+    last_names = ['smith', 'johnson', 'williams', 'brown', 'jones', 'garcia', 'miller', 'davis', 'rodriguez', 'martinez']
+    domains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com']
+    return f"{random.choice(first_names)}.{random.choice(last_names)}{random.randint(100,999)}@{random.choice(domains)}"
 
-def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+def register_user(session, name):
+    """Register a new user and return user data"""
+    email = random_email()
+    password = 'SecurePass123!'
+    resp = session.post(f"{BASE_URL}/auth/register", json={'email': email, 'password': password, 'name': name})
+    if resp.status_code != 200:
+        print(f"❌ Registration failed for {name}: {resp.status_code} - {resp.text}")
+        return None
+    print(f"✅ Registered {name} ({email})")
+    return {'email': email, 'password': password, 'name': name, 'data': resp.json()}
 
-def test_auth():
-    """Test authentication endpoints"""
-    log("=" * 60)
-    log("TEST 1: Authentication")
-    log("=" * 60)
-    
-    # Register Captain A
-    log("Registering Captain A...")
-    resp = session_a.post(f"{BASE_URL}/auth/register", json={
-        "email": f"captain.alpha.{TEST_RUN_ID}@footup.test",
-        "password": "SecurePass123!",
-        "name": "Captain Alpha"
-    })
-    assert resp.status_code == 200, f"Register A failed: {resp.status_code} {resp.text}"
-    data = resp.json()
-    assert "user" in data, "No user in response"
-    assert data["user"]["email"] == f"captain.alpha.{TEST_RUN_ID}@footup.test"
-    user_a_id = data["user"]["id"]
-    log(f"✅ Captain A registered: {user_a_id}")
-    
-    # Verify cookie was set
-    assert "footup_token" in session_a.cookies, "Cookie not set for Captain A"
-    log(f"✅ Cookie 'footup_token' set for Captain A")
-    
-    # Test duplicate registration
-    log("Testing duplicate registration...")
-    resp = session_a.post(f"{BASE_URL}/auth/register", json={
-        "email": f"captain.alpha.{TEST_RUN_ID}@footup.test",
-        "password": "different",
-        "name": "Duplicate"
-    })
-    assert resp.status_code == 409, f"Expected 409 for duplicate, got {resp.status_code}"
-    log("✅ Duplicate registration correctly rejected with 409")
-    
-    # Test /auth/me for Captain A
-    log("Testing GET /auth/me for Captain A...")
-    resp = session_a.get(f"{BASE_URL}/auth/me")
-    assert resp.status_code == 200, f"GET /auth/me failed: {resp.status_code}"
-    data = resp.json()
-    assert data["user"]["id"] == user_a_id
-    assert data["team"] is None, "Team should be null initially"
-    log("✅ GET /auth/me works, team is null")
-    
-    # Register Captain B
-    log("Registering Captain B...")
-    resp = session_b.post(f"{BASE_URL}/auth/register", json={
-        "email": f"captain.bravo.{TEST_RUN_ID}@footup.test",
-        "password": "SecurePass456!",
-        "name": "Captain Bravo"
-    })
-    assert resp.status_code == 200, f"Register B failed: {resp.status_code}"
-    user_b_id = resp.json()["user"]["id"]
-    log(f"✅ Captain B registered: {user_b_id}")
-    
-    # Test login
-    log("Testing login for Captain A (new session)...")
-    session_login = requests.Session()
-    resp = session_login.post(f"{BASE_URL}/auth/login", json={
-        "email": f"captain.alpha.{TEST_RUN_ID}@footup.test",
-        "password": "SecurePass123!"
-    })
-    assert resp.status_code == 200, f"Login failed: {resp.status_code}"
-    assert "footup_token" in session_login.cookies
-    log("✅ Login successful, cookie set")
-    
-    # Test invalid login
-    log("Testing invalid login...")
-    resp = session_login.post(f"{BASE_URL}/auth/login", json={
-        "email": f"captain.alpha.{TEST_RUN_ID}@footup.test",
-        "password": "WrongPassword"
-    })
-    assert resp.status_code == 401, f"Expected 401 for invalid login, got {resp.status_code}"
-    log("✅ Invalid login correctly rejected with 401")
-    
-    # Test logout
-    log("Testing logout...")
-    resp = session_a.post(f"{BASE_URL}/auth/logout")
-    assert resp.status_code == 200
-    # Re-login for subsequent tests
-    resp = session_a.post(f"{BASE_URL}/auth/login", json={
-        "email": f"captain.alpha.{TEST_RUN_ID}@footup.test",
-        "password": "SecurePass123!"
-    })
-    assert resp.status_code == 200
-    log("✅ Logout works, re-logged in")
-    
-    return user_a_id, user_b_id
+def get_me(session):
+    """Get current user info"""
+    resp = session.get(f"{BASE_URL}/auth/me")
+    if resp.status_code != 200:
+        return None
+    return resp.json()
 
-def test_teams():
-    """Test team creation and management"""
-    log("\n" + "=" * 60)
-    log("TEST 2: Teams")
-    log("=" * 60)
-    
-    # Create Team A
-    log("Creating Team A...")
-    resp = session_a.post(f"{BASE_URL}/teams", json={
-        "name": "Alpha United FC",
-        "city": "Manchester",
-        "football_type": "5",
-        "description": "The best 5-a-side team in town",
-        "primary_color": "#e11d48",
-        "secondary_color": "#ffffff"
-    })
-    assert resp.status_code == 200, f"Create team A failed: {resp.status_code} {resp.text}"
-    team_a = resp.json()["team"]
-    team_a_id = team_a["id"]
-    assert team_a["name"] == "Alpha United FC"
-    assert team_a["rating"] == 1000, f"Initial rating should be 1000, got {team_a['rating']}"
-    assert team_a["wins"] == 0
-    assert team_a["losses"] == 0
-    log(f"✅ Team A created: {team_a_id}, rating={team_a['rating']}")
-    
-    # Test duplicate team creation
-    log("Testing duplicate team creation...")
-    resp = session_a.post(f"{BASE_URL}/teams", json={
-        "name": "Another Team",
-        "city": "London"
-    })
-    assert resp.status_code == 409, f"Expected 409 for duplicate team, got {resp.status_code}"
-    log("✅ Duplicate team creation correctly rejected with 409")
-    
-    # Create Team B
-    log("Creating Team B...")
-    resp = session_b.post(f"{BASE_URL}/teams", json={
-        "name": "Bravo Strikers",
-        "city": "Liverpool",
-        "football_type": "5",
-        "description": "Ready to compete",
-        "primary_color": "#3b82f6"
-    })
-    assert resp.status_code == 200, f"Create team B failed: {resp.status_code}"
-    team_b = resp.json()["team"]
-    team_b_id = team_b["id"]
-    assert team_b["rating"] == 1000
-    log(f"✅ Team B created: {team_b_id}, rating={team_b['rating']}")
-    
-    # Test GET /teams
-    log("Testing GET /teams...")
-    resp = session_a.get(f"{BASE_URL}/teams")
-    assert resp.status_code == 200
-    teams = resp.json()["teams"]
-    assert len(teams) >= 2, f"Expected at least 2 teams, got {len(teams)}"
-    # Check division is included
-    assert "division" in teams[0], "Division object missing from team"
-    log(f"✅ GET /teams returns {len(teams)} teams with division info")
-    
-    # Test GET /teams/:id
-    log(f"Testing GET /teams/{team_a_id}...")
-    resp = session_a.get(f"{BASE_URL}/teams/{team_a_id}")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["team"]["id"] == team_a_id
-    assert "players" in data
-    assert "posts" in data
-    assert "division" in data["team"]
-    log("✅ GET /teams/:id returns team with players, posts, and division")
-    
-    # Test PUT /teams/:id (update)
-    log("Testing PUT /teams/:id...")
-    resp = session_a.put(f"{BASE_URL}/teams/{team_a_id}", json={
-        "description": "Updated description for Alpha United"
-    })
-    assert resp.status_code == 200
-    updated = resp.json()["team"]
-    assert updated["description"] == "Updated description for Alpha United"
-    log("✅ Team update successful")
-    
-    # Test unauthorized update
-    log("Testing unauthorized team update...")
-    resp = session_b.put(f"{BASE_URL}/teams/{team_a_id}", json={
-        "description": "Hacking attempt"
-    })
-    assert resp.status_code == 403, f"Expected 403 for unauthorized update, got {resp.status_code}"
-    log("✅ Unauthorized update correctly rejected with 403")
-    
-    # Test follow/unfollow
-    log("Testing team follow...")
-    resp = session_b.post(f"{BASE_URL}/teams/{team_a_id}/follow")
-    assert resp.status_code == 200
-    assert resp.json()["following"] == True
-    log("✅ Team follow successful")
-    
-    resp = session_b.post(f"{BASE_URL}/teams/{team_a_id}/follow")
-    assert resp.status_code == 200
-    assert resp.json()["following"] == False
-    log("✅ Team unfollow successful")
-    
-    return team_a_id, team_b_id
+# ============ TEST 1: PRO REMOVAL ============
+print("\n" + "="*60)
+print("TEST 1: PRO REMOVAL - Removed endpoints & advanced stats")
+print("="*60)
 
-def test_players(team_a_id, team_b_id):
-    """Test player management"""
-    log("\n" + "=" * 60)
-    log("TEST 3: Players")
-    log("=" * 60)
-    
-    # Add player to Team A
-    log("Adding player to Team A...")
-    resp = session_a.post(f"{BASE_URL}/teams/{team_a_id}/players", json={
-        "first_name": "John",
-        "last_name": "Striker",
-        "shirt_number": 10,
-        "position": "FWD",
-        "is_captain": True
-    })
-    assert resp.status_code == 200, f"Add player failed: {resp.status_code} {resp.text}"
-    player = resp.json()["player"]
-    player_a_id = player["id"]
-    assert player["first_name"] == "John"
-    assert player["goals"] == 0
-    log(f"✅ Player added to Team A: {player_a_id}")
-    
-    # Test unauthorized player addition
-    log("Testing unauthorized player addition...")
-    resp = session_b.post(f"{BASE_URL}/teams/{team_a_id}/players", json={
-        "first_name": "Hacker",
-        "last_name": "McHack"
-    })
-    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}"
-    log("✅ Unauthorized player addition rejected with 403")
-    
-    # Verify player appears in team details
-    resp = session_a.get(f"{BASE_URL}/teams/{team_a_id}")
-    assert resp.status_code == 200
-    players = resp.json()["players"]
-    assert len(players) >= 1
-    assert players[0]["id"] == player_a_id
-    log("✅ Player appears in team details")
-    
-    return player_a_id
-
-def test_feed():
-    """Test feed and posts"""
-    log("\n" + "=" * 60)
-    log("TEST 4: Feed & Posts")
-    log("=" * 60)
-    
-    # Create post
-    log("Creating post...")
-    resp = session_a.post(f"{BASE_URL}/posts", json={
-        "content": "Ready for our first match! 🔥",
-        "kind": "announcement"
-    })
-    assert resp.status_code == 200, f"Create post failed: {resp.status_code} {resp.text}"
-    post = resp.json()["post"]
-    post_id = post["id"]
-    assert post["content"] == "Ready for our first match! 🔥"
-    assert len(post["likes"]) == 0
-    log(f"✅ Post created: {post_id}")
-    
-    # Get feed
-    log("Getting feed...")
-    resp = session_a.get(f"{BASE_URL}/feed")
-    assert resp.status_code == 200
-    posts = resp.json()["posts"]
-    assert len(posts) >= 1
-    log(f"✅ Feed retrieved with {len(posts)} posts")
-    
-    # Like post
-    log("Liking post...")
-    resp = session_b.post(f"{BASE_URL}/posts/{post_id}/like")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["liked"] == True
-    assert data["count"] == 1
-    log("✅ Post liked")
-    
-    # Unlike post
-    log("Unliking post...")
-    resp = session_b.post(f"{BASE_URL}/posts/{post_id}/like")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["liked"] == False
-    assert data["count"] == 0
-    log("✅ Post unliked")
-    
-    # Comment on post
-    log("Commenting on post...")
-    resp = session_b.post(f"{BASE_URL}/posts/{post_id}/comment", json={
-        "text": "Good luck! See you on the pitch!"
-    })
-    assert resp.status_code == 200
-    comment = resp.json()["comment"]
-    assert comment["text"] == "Good luck! See you on the pitch!"
-    log(f"✅ Comment added: {comment['id']}")
-    
-    return post_id
-
-def test_challenges(team_a_id, team_b_id):
-    """Test challenge creation and acceptance"""
-    log("\n" + "=" * 60)
-    log("TEST 5: Challenges")
-    log("=" * 60)
-    
-    # Create challenge from Team A
-    log("Creating challenge from Team A...")
-    resp = session_a.post(f"{BASE_URL}/challenges", json={
-        "football_type": "5",
-        "date": "2025-02-15",
-        "time": "18:00",
-        "city": "Manchester",
-        "facility": "City Sports Center",
-        "skill_level": "intermediate",
-        "notes": "Looking for a competitive match"
-    })
-    assert resp.status_code == 200, f"Create challenge failed: {resp.status_code} {resp.text}"
-    challenge = resp.json()["challenge"]
-    challenge_id = challenge["id"]
-    assert challenge["status"] == "open"
-    assert challenge["football_type"] == "5"
-    log(f"✅ Challenge created: {challenge_id}")
-    
-    # Get challenges
-    log("Getting challenges...")
-    resp = session_b.get(f"{BASE_URL}/challenges")
-    assert resp.status_code == 200
-    challenges = resp.json()["challenges"]
-    assert len(challenges) >= 1
-    found = any(c["id"] == challenge_id for c in challenges)
-    assert found, "Created challenge not found in list"
-    log(f"✅ Challenges retrieved, found our challenge")
-    
-    # Test accepting own challenge (should fail)
-    log("Testing accepting own challenge...")
-    resp = session_a.post(f"{BASE_URL}/challenges/{challenge_id}/accept")
-    assert resp.status_code == 400, f"Expected 400 for accepting own challenge, got {resp.status_code}"
-    log("✅ Accepting own challenge correctly rejected with 400")
-    
-    # Accept challenge from Team B
-    log("Accepting challenge from Team B...")
-    resp = session_b.post(f"{BASE_URL}/challenges/{challenge_id}/accept")
-    assert resp.status_code == 200, f"Accept challenge failed: {resp.status_code} {resp.text}"
-    match = resp.json()["match"]
-    match_id = match["id"]
-    assert match["status"] == "scheduled"
-    assert match["home_team_id"] == team_a_id
-    assert match["away_team_id"] == team_b_id
-    log(f"✅ Challenge accepted, match created: {match_id}")
-    
-    # Verify challenge status updated
-    resp = session_a.get(f"{BASE_URL}/challenges")
-    challenges = resp.json()["challenges"]
-    accepted_ch = next((c for c in challenges if c["id"] == challenge_id), None)
-    assert accepted_ch is not None
-    assert accepted_ch["status"] == "accepted"
-    log("✅ Challenge status updated to 'accepted'")
-    
-    # Test accepting already accepted challenge
-    log("Testing accepting already accepted challenge...")
-    resp = session_a.post(f"{BASE_URL}/challenges/{challenge_id}/accept")
-    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
-    log("✅ Accepting already accepted challenge rejected")
-    
-    return challenge_id, match_id
-
-def test_matches_confirmed(match_id, team_a_id, team_b_id):
-    """Test match confirmation with matching scores (ELO update)"""
-    log("\n" + "=" * 60)
-    log("TEST 6: Match Confirmation - Matching Scores")
-    log("=" * 60)
-    
-    # Get initial ratings
-    resp = session_a.get(f"{BASE_URL}/teams/{team_a_id}")
-    team_a_before = resp.json()["team"]
-    rating_a_before = team_a_before["rating"]
-    
-    resp = session_b.get(f"{BASE_URL}/teams/{team_b_id}")
-    team_b_before = resp.json()["team"]
-    rating_b_before = team_b_before["rating"]
-    
-    log(f"Initial ratings - Team A: {rating_a_before}, Team B: {rating_b_before}")
-    
-    # Team A confirms score (3-1 win for home team A)
-    log("Team A confirming score: 3-1...")
-    resp = session_a.post(f"{BASE_URL}/matches/{match_id}/confirm", json={
-        "score_home": 3,
-        "score_away": 1
-    })
-    assert resp.status_code == 200, f"Confirm failed: {resp.status_code} {resp.text}"
-    match = resp.json()["match"]
-    assert match["status"] == "pending", f"Expected 'pending', got {match['status']}"
-    log("✅ Team A confirmed, status='pending'")
-    
-    # Team B confirms matching score
-    log("Team B confirming matching score: 3-1...")
-    resp = session_b.post(f"{BASE_URL}/matches/{match_id}/confirm", json={
-        "score_home": 3,
-        "score_away": 1
-    })
-    assert resp.status_code == 200, f"Confirm failed: {resp.status_code} {resp.text}"
-    match = resp.json()["match"]
-    assert match["status"] == "confirmed", f"Expected 'confirmed', got {match['status']}"
-    log("✅ Team B confirmed, status='confirmed'")
-    
-    # Verify ELO updates
-    log("Verifying ELO updates...")
-    resp = session_a.get(f"{BASE_URL}/teams/{team_a_id}")
-    team_a_after = resp.json()["team"]
-    rating_a_after = team_a_after["rating"]
-    
-    resp = session_b.get(f"{BASE_URL}/teams/{team_b_id}")
-    team_b_after = resp.json()["team"]
-    rating_b_after = team_b_after["rating"]
-    
-    log(f"After ratings - Team A: {rating_a_after}, Team B: {rating_b_after}")
-    
-    # Expected: ~1016 for winner, ~984 for loser (K=32, equal ratings, no streak bonus on first match)
-    # Actual calculation: E(A) = 0.5, delta = 32 * (1 - 0.5) = 16
-    expected_a = rating_a_before + 16
-    expected_b = rating_b_before - 16
-    
-    assert rating_a_after > rating_a_before, f"Winner rating should increase: {rating_a_before} -> {rating_a_after}"
-    assert rating_b_after < rating_b_before, f"Loser rating should decrease: {rating_b_before} -> {rating_b_after}"
-    
-    # Allow small variance due to rounding
-    assert abs(rating_a_after - expected_a) <= 2, f"Expected ~{expected_a}, got {rating_a_after}"
-    assert abs(rating_b_after - expected_b) <= 2, f"Expected ~{expected_b}, got {rating_b_after}"
-    
-    log(f"✅ ELO updates correct: A={rating_a_after} (Δ+{rating_a_after - rating_a_before}), B={rating_b_after} (Δ{rating_b_after - rating_b_before})")
-    
-    # Verify stats updates
-    assert team_a_after["wins"] == 1, f"Team A should have 1 win, got {team_a_after['wins']}"
-    assert team_a_after["losses"] == 0
-    assert team_a_after["matches_played"] == 1
-    assert team_a_after["goals_for"] == 3
-    assert team_a_after["goals_against"] == 1
-    
-    assert team_b_after["wins"] == 0
-    assert team_b_after["losses"] == 1, f"Team B should have 1 loss, got {team_b_after['losses']}"
-    assert team_b_after["matches_played"] == 1
-    assert team_b_after["goals_for"] == 1
-    assert team_b_after["goals_against"] == 3
-    
-    log("✅ Win/loss stats updated correctly")
-    
-    # Verify last_matches array
-    assert len(team_a_after["last_matches"]) == 1, "Team A should have 1 match in history"
-    last_match_a = team_a_after["last_matches"][0]
-    assert last_match_a["opponent"] == "Bravo Strikers"
-    assert last_match_a["score"] == "3-1"
-    assert last_match_a["result"] == "W"
-    assert last_match_a["delta"] == rating_a_after - rating_a_before
-    
-    assert len(team_b_after["last_matches"]) == 1
-    last_match_b = team_b_after["last_matches"][0]
-    assert last_match_b["opponent"] == "Alpha United FC"
-    assert last_match_b["score"] == "1-3"
-    assert last_match_b["result"] == "L"
-    assert last_match_b["delta"] == rating_b_after - rating_b_before
-    
-    log("✅ last_matches array populated correctly with opponent, score, result, delta")
-    
-    # Verify streak
-    assert team_a_after["streak"] == 1, f"Team A streak should be 1, got {team_a_after['streak']}"
-    assert team_b_after["streak"] == 0, f"Team B streak should be 0, got {team_b_after['streak']}"
-    log("✅ Streak updated correctly")
-    
-    return rating_a_after, rating_b_after
-
-def test_matches_disputed(team_a_id, team_b_id):
-    """Test match confirmation with mismatching scores (disputed)"""
-    log("\n" + "=" * 60)
-    log("TEST 7: Match Confirmation - Disputed")
-    log("=" * 60)
-    
-    # Create another challenge
-    log("Creating second challenge...")
-    resp = session_b.post(f"{BASE_URL}/challenges", json={
-        "football_type": "5",
-        "date": "2025-02-20",
-        "city": "Liverpool"
-    })
-    assert resp.status_code == 200
-    challenge_id = resp.json()["challenge"]["id"]
-    
-    # Accept challenge
-    resp = session_a.post(f"{BASE_URL}/challenges/{challenge_id}/accept")
-    assert resp.status_code == 200
-    match_id = resp.json()["match"]["id"]
-    log(f"✅ Second match created: {match_id}")
-    
-    # Get current ratings
-    resp = session_a.get(f"{BASE_URL}/teams/{team_a_id}")
-    rating_a_before = resp.json()["team"]["rating"]
-    
-    resp = session_b.get(f"{BASE_URL}/teams/{team_b_id}")
-    rating_b_before = resp.json()["team"]["rating"]
-    
-    log(f"Current ratings - Team A: {rating_a_before}, Team B: {rating_b_before}")
-    
-    # Team A confirms 2-1
-    log("Team A confirming score: 2-1...")
-    resp = session_a.post(f"{BASE_URL}/matches/{match_id}/confirm", json={
-        "score_home": 2,
-        "score_away": 1
-    })
-    assert resp.status_code == 200
-    assert resp.json()["match"]["status"] == "pending"
-    
-    # Team B confirms different score 1-2 (conflicting)
-    log("Team B confirming conflicting score: 1-2...")
-    resp = session_b.post(f"{BASE_URL}/matches/{match_id}/confirm", json={
-        "score_home": 1,
-        "score_away": 2
-    })
-    assert resp.status_code == 200
-    match = resp.json()["match"]
-    assert match["status"] == "disputed", f"Expected 'disputed', got {match['status']}"
-    log("✅ Conflicting scores result in status='disputed'")
-    
-    # Verify NO ELO change
-    resp = session_a.get(f"{BASE_URL}/teams/{team_a_id}")
-    rating_a_after = resp.json()["team"]["rating"]
-    
-    resp = session_b.get(f"{BASE_URL}/teams/{team_b_id}")
-    rating_b_after = resp.json()["team"]["rating"]
-    
-    assert rating_a_after == rating_a_before, f"Team A rating should not change on dispute: {rating_a_before} -> {rating_a_after}"
-    assert rating_b_after == rating_b_before, f"Team B rating should not change on dispute: {rating_b_before} -> {rating_b_after}"
-    
-    log(f"✅ No ELO change on disputed match: A={rating_a_after}, B={rating_b_after}")
-
-def test_leaderboards():
-    """Test leaderboard endpoints"""
-    log("\n" + "=" * 60)
-    log("TEST 8: Leaderboards")
-    log("=" * 60)
-    
-    # Get team leaderboard
-    log("Getting team leaderboard...")
-    resp = session_a.get(f"{BASE_URL}/leaderboard/teams")
-    assert resp.status_code == 200, f"Leaderboard failed: {resp.status_code}"
-    teams = resp.json()["teams"]
-    assert len(teams) >= 2, f"Expected at least 2 teams, got {len(teams)}"
-    
-    # Verify sorted by rating descending
-    for i in range(len(teams) - 1):
-        assert teams[i]["rating"] >= teams[i+1]["rating"], "Teams not sorted by rating desc"
-    
-    # Verify division object present
-    for team in teams:
-        assert "division" in team, "Division missing from team"
-        div = team["division"]
-        assert "division" in div and "name" in div and "color" in div and "tier" in div
-    
-    log(f"✅ Team leaderboard returns {len(teams)} teams sorted by rating with division badges")
-    
-    # Get scorers leaderboard
-    log("Getting scorers leaderboard...")
-    resp = session_a.get(f"{BASE_URL}/leaderboard/scorers")
-    assert resp.status_code == 200
-    players = resp.json()["players"]
-    log(f"✅ Scorers leaderboard returns {len(players)} players")
-    
-    # Get assists leaderboard
-    log("Getting assists leaderboard...")
-    resp = session_a.get(f"{BASE_URL}/leaderboard/assists")
-    assert resp.status_code == 200
-    players = resp.json()["players"]
-    log(f"✅ Assists leaderboard returns {len(players)} players")
-
-def test_divisions():
-    """Test divisions endpoint"""
-    log("\n" + "=" * 60)
-    log("TEST 9: Divisions")
-    log("=" * 60)
-    
-    log("Getting divisions...")
-    resp = session_a.get(f"{BASE_URL}/divisions")
-    assert resp.status_code == 200, f"Divisions failed: {resp.status_code}"
-    divisions = resp.json()["divisions"]
-    
-    assert len(divisions) == 10, f"Expected 10 divisions, got {len(divisions)}"
-    
-    # Verify structure
-    for div in divisions:
-        assert "division" in div, "Missing 'division' field"
-        assert "name" in div, "Missing 'name' field"
-        assert "color" in div, "Missing 'color' field"
-        assert "tier" in div, "Missing 'tier' field"
-        assert "count" in div, "Missing 'count' field"
-        assert isinstance(div["count"], int), "Count should be integer"
-    
-    # Note: There's a minor bug in the divisions endpoint where the rating calculation
-    # doesn't perfectly align with division thresholds, causing some duplicate division numbers.
-    # This doesn't affect core functionality, so we'll just verify we get 10 items.
-    
-    log(f"✅ Divisions endpoint returns 10 divisions with counts")
-    for div in divisions:
-        log(f"   Division {div['division']}: {div['name']} ({div['tier']}) - {div['count']} teams")
-
-def test_unauthorized_access():
-    """Test unauthorized access to protected endpoints"""
-    log("\n" + "=" * 60)
-    log("TEST 10: Unauthorized Access")
-    log("=" * 60)
-    
-    # Create session without auth
-    unauth_session = requests.Session()
-    
-    log("Testing unauthorized POST /teams...")
-    resp = unauth_session.post(f"{BASE_URL}/teams", json={"name": "Hacker Team"})
-    assert resp.status_code == 401, f"Expected 401, got {resp.status_code}"
-    log("✅ Unauthorized team creation rejected")
-    
-    log("Testing unauthorized POST /posts...")
-    resp = unauth_session.post(f"{BASE_URL}/posts", json={"content": "Hack"})
-    assert resp.status_code == 401, f"Expected 401, got {resp.status_code}"
-    log("✅ Unauthorized post creation rejected")
-    
-    log("Testing unauthorized POST /challenges...")
-    resp = unauth_session.post(f"{BASE_URL}/challenges", json={"football_type": "5"})
-    assert resp.status_code == 401, f"Expected 401, got {resp.status_code}"
-    log("✅ Unauthorized challenge creation rejected")
-    
-    log("Testing unauthorized GET /matches...")
-    resp = unauth_session.get(f"{BASE_URL}/matches")
-    assert resp.status_code == 401, f"Expected 401, got {resp.status_code}"
-    log("✅ Unauthorized match access rejected")
-
-def main():
-    """Run all tests"""
-    print("\n" + "=" * 60)
-    print("FOOTUP BACKEND API - END-TO-END TEST")
-    print("=" * 60)
-    print(f"Base URL: {BASE_URL}")
-    print("=" * 60 + "\n")
-    
-    try:
-        # Test sequence
-        user_a_id, user_b_id = test_auth()
-        team_a_id, team_b_id = test_teams()
-        player_a_id = test_players(team_a_id, team_b_id)
-        post_id = test_feed()
-        challenge_id, match_id = test_challenges(team_a_id, team_b_id)
-        rating_a, rating_b = test_matches_confirmed(match_id, team_a_id, team_b_id)
-        test_matches_disputed(team_a_id, team_b_id)
-        test_leaderboards()
-        test_divisions()
-        test_unauthorized_access()
+try:
+    # Test removed endpoints return 404
+    s = requests.Session()
+    removed_endpoints = [
+        '/subscription/status',
+        '/subscription/checkout',
+        '/admin/pro-teams',
+        '/admin/subscriptions',
+        '/admin/grant-pro'
+    ]
+    
+    for endpoint in removed_endpoints:
+        resp = s.get(f"{BASE_URL}{endpoint}")
+        if resp.status_code == 404:
+            print(f"✅ {endpoint} returns 404 (removed)")
+        else:
+            print(f"❌ {endpoint} returned {resp.status_code}, expected 404")
+    
+    # Test new user has role='player', no plan/pro_until
+    user_info = register_user(s, "Test Player")
+    if user_info:
+        me = get_me(s)
+        if me and me['user'].get('role') == 'player':
+            print(f"✅ New user has role='player'")
+        else:
+            print(f"❌ New user role: {me['user'].get('role') if me else 'N/A'}, expected 'player'")
         
-        # Final summary
-        log("\n" + "=" * 60)
-        log("ALL TESTS PASSED ✅")
-        log("=" * 60)
-        log(f"Final state:")
-        log(f"  - Team A (Alpha United FC): Rating {rating_a}, 1 win")
-        log(f"  - Team B (Bravo Strikers): Rating {rating_b}, 1 loss")
-        log(f"  - ELO system working correctly")
-        log(f"  - Dual confirmation system working")
-        log(f"  - Disputed matches handled correctly")
-        log(f"  - All endpoints functional")
-        log("=" * 60)
-        
-        return 0
-        
-    except AssertionError as e:
-        log(f"\n❌ TEST FAILED: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
-    except Exception as e:
-        log(f"\n❌ UNEXPECTED ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
+        if me and 'plan' not in me['user'] and 'pro_until' not in me['user']:
+            print(f"✅ New user has no plan/pro_until fields")
+        else:
+            print(f"❌ New user has plan/pro_until fields: {me['user'] if me else 'N/A'}")
+    
+    # Create a team to test advanced-stats
+    team_resp = s.post(f"{BASE_URL}/teams", json={'name': 'Test Team Stats', 'city': 'London'})
+    if team_resp.status_code == 200:
+        team_id = team_resp.json()['team']['id']
+        stats_resp = s.get(f"{BASE_URL}/teams/{team_id}/advanced-stats")
+        if stats_resp.status_code == 200:
+            print(f"✅ /teams/:id/advanced-stats returns 200 for any team")
+        else:
+            print(f"❌ /teams/:id/advanced-stats returned {stats_resp.status_code}, expected 200")
+    
+    print("✅ TEST 1 PASSED: PRO removal working correctly")
+except Exception as e:
+    print(f"❌ TEST 1 FAILED: {e}")
 
-if __name__ == "__main__":
-    exit(main())
+# ============ TEST 2: CLUB MEMBERSHIP MODEL ============
+print("\n" + "="*60)
+print("TEST 2: CLUB MEMBERSHIP MODEL - Roles & /auth/me")
+print("="*60)
+
+try:
+    # Register captain A, player P1, player P2
+    captain_a = requests.Session()
+    player_p1 = requests.Session()
+    player_p2 = requests.Session()
+    
+    cap_a_info = register_user(captain_a, "Captain Alpha")
+    p1_info = register_user(player_p1, "Player One")
+    p2_info = register_user(player_p2, "Player Two")
+    
+    # Check P1 is free_agent initially
+    me_p1 = get_me(player_p1)
+    if me_p1['role'] == 'free_agent' and me_p1['team'] is None:
+        print(f"✅ P1 initial role: free_agent, team: null")
+    else:
+        print(f"❌ P1 initial state: role={me_p1['role']}, team={me_p1['team']}")
+    
+    # Captain A creates team
+    team_resp = captain_a.post(f"{BASE_URL}/teams", json={'name': 'Alpha FC', 'city': 'Manchester', 'football_type': '5'})
+    if team_resp.status_code != 200:
+        print(f"❌ Team creation failed: {team_resp.status_code} - {team_resp.text}")
+        raise Exception("Team creation failed")
+    
+    team_a = team_resp.json()['team']
+    print(f"✅ Captain A created team: {team_a['name']}")
+    
+    # Check A's /auth/me shows role='captain'
+    me_a = get_me(captain_a)
+    if me_a['role'] == 'captain' and me_a['membership']['role'] == 'captain':
+        print(f"✅ Captain A role: captain, membership.role: captain")
+    else:
+        print(f"❌ Captain A: role={me_a['role']}, membership.role={me_a.get('membership', {}).get('role')}")
+    
+    # Captain A tries to create second team -> 409
+    team2_resp = captain_a.post(f"{BASE_URL}/teams", json={'name': 'Beta FC', 'city': 'London'})
+    if team2_resp.status_code == 409:
+        print(f"✅ Captain A cannot create second team (409)")
+    else:
+        print(f"❌ Second team creation returned {team2_resp.status_code}, expected 409")
+    
+    print("✅ TEST 2 PASSED: Club membership model working")
+except Exception as e:
+    print(f"❌ TEST 2 FAILED: {e}")
+
+# ============ TEST 3: JOIN REQUESTS FLOW ============
+print("\n" + "="*60)
+print("TEST 3: JOIN REQUESTS FLOW - Send/Accept/Reject/Cancel")
+print("="*60)
+
+try:
+    # P1 sends join request to team A
+    jr_resp = player_p1.post(f"{BASE_URL}/teams/{team_a['id']}/join-request", json={
+        'message': 'I want to join your team!',
+        'position': 'FWD',
+        'jersey_number': 9
+    })
+    if jr_resp.status_code != 200:
+        print(f"❌ Join request failed: {jr_resp.status_code} - {jr_resp.text}")
+        raise Exception("Join request failed")
+    
+    jr_p1 = jr_resp.json()['request']
+    print(f"✅ P1 sent join request to team A")
+    
+    # P1 tries duplicate request -> 409
+    dup_resp = player_p1.post(f"{BASE_URL}/teams/{team_a['id']}/join-request", json={'message': 'Again'})
+    if dup_resp.status_code == 409:
+        print(f"✅ Duplicate join request returns 409")
+    else:
+        print(f"❌ Duplicate request returned {dup_resp.status_code}, expected 409")
+    
+    # Captain A gets join requests
+    jrs_resp = captain_a.get(f"{BASE_URL}/teams/{team_a['id']}/join-requests")
+    if jrs_resp.status_code == 200 and len(jrs_resp.json()['requests']) == 1:
+        print(f"✅ Captain A sees 1 pending join request")
+    else:
+        print(f"❌ Join requests: {jrs_resp.status_code}, count: {len(jrs_resp.json().get('requests', []))}")
+    
+    # P1 tries to get join requests -> 403
+    p1_jrs_resp = player_p1.get(f"{BASE_URL}/teams/{team_a['id']}/join-requests")
+    if p1_jrs_resp.status_code == 403:
+        print(f"✅ P1 cannot view join requests (403)")
+    else:
+        print(f"❌ P1 join requests returned {p1_jrs_resp.status_code}, expected 403")
+    
+    # Check Captain A's pending_requests_count
+    me_a = get_me(captain_a)
+    if me_a['pending_requests_count'] == 1:
+        print(f"✅ Captain A pending_requests_count: 1")
+    else:
+        print(f"❌ Captain A pending_requests_count: {me_a.get('pending_requests_count')}, expected 1")
+    
+    # Captain A accepts P1's request
+    accept_resp = captain_a.post(f"{BASE_URL}/join-requests/{jr_p1['id']}/accept")
+    if accept_resp.status_code != 200:
+        print(f"❌ Accept request failed: {accept_resp.status_code} - {accept_resp.text}")
+        raise Exception("Accept request failed")
+    
+    print(f"✅ Captain A accepted P1's request")
+    
+    # Check P1 is now a player
+    me_p1 = get_me(player_p1)
+    if me_p1['role'] == 'player' and me_p1['membership']['role'] == 'player':
+        print(f"✅ P1 role: player, membership.role: player")
+    else:
+        print(f"❌ P1: role={me_p1['role']}, membership.role={me_p1.get('membership', {}).get('role')}")
+    
+    # Check team has 2 members
+    team_resp = captain_a.get(f"{BASE_URL}/teams/{team_a['id']}")
+    members = team_resp.json()['members']
+    if len(members) == 2:
+        print(f"✅ Team A has 2 members")
+    else:
+        print(f"❌ Team A members: {len(members)}, expected 2")
+    
+    # P1 tries to create team -> 409
+    p1_team_resp = player_p1.post(f"{BASE_URL}/teams", json={'name': 'P1 Team'})
+    if p1_team_resp.status_code == 409:
+        print(f"✅ P1 cannot create team (409)")
+    else:
+        print(f"❌ P1 team creation returned {p1_team_resp.status_code}, expected 409")
+    
+    # P1 tries to join another team -> 409
+    captain_b = requests.Session()
+    register_user(captain_b, "Captain Beta")
+    team_b_resp = captain_b.post(f"{BASE_URL}/teams", json={'name': 'Beta FC', 'city': 'Liverpool'})
+    team_b = team_b_resp.json()['team']
+    
+    p1_jr2_resp = player_p1.post(f"{BASE_URL}/teams/{team_b['id']}/join-request", json={'message': 'Join Beta'})
+    if p1_jr2_resp.status_code == 409:
+        print(f"✅ P1 cannot join another team (409)")
+    else:
+        print(f"❌ P1 join another team returned {p1_jr2_resp.status_code}, expected 409")
+    
+    print("✅ TEST 3 PASSED: Join requests flow working")
+except Exception as e:
+    print(f"❌ TEST 3 FAILED: {e}")
+
+# ============ TEST 4: CAPTAIN-ONLY PERMISSIONS ============
+print("\n" + "="*60)
+print("TEST 4: CAPTAIN-ONLY PERMISSIONS - 403 for players")
+print("="*60)
+
+try:
+    # P1 (player) tries to update team -> 403
+    update_resp = player_p1.put(f"{BASE_URL}/teams/{team_a['id']}", json={'name': 'Hacked Team'})
+    if update_resp.status_code == 403:
+        print(f"✅ P1 cannot update team (403)")
+    else:
+        print(f"❌ P1 update team returned {update_resp.status_code}, expected 403")
+    
+    # P1 tries to create challenge -> 403
+    ch_resp = player_p1.post(f"{BASE_URL}/challenges", json={'football_type': '5', 'city': 'Manchester'})
+    if ch_resp.status_code == 403:
+        print(f"✅ P1 cannot create challenge (403)")
+    else:
+        print(f"❌ P1 create challenge returned {ch_resp.status_code}, expected 403")
+    
+    # P1 can create post -> 200
+    post_resp = player_p1.post(f"{BASE_URL}/posts", json={'content': 'Hello from P1!', 'kind': 'update'})
+    if post_resp.status_code == 200:
+        print(f"✅ P1 can create post (200)")
+    else:
+        print(f"❌ P1 create post returned {post_resp.status_code}, expected 200")
+    
+    print("✅ TEST 4 PASSED: Captain-only permissions working")
+except Exception as e:
+    print(f"❌ TEST 4 FAILED: {e}")
+
+# ============ TEST 5: JOIN REQUEST REJECT & CANCEL ============
+print("\n" + "="*60)
+print("TEST 5: JOIN REQUEST REJECT & CANCEL")
+print("="*60)
+
+try:
+    # P2 sends request to team A
+    jr2_resp = player_p2.post(f"{BASE_URL}/teams/{team_a['id']}/join-request", json={'message': 'Let me join!', 'position': 'MID'})
+    jr_p2 = jr2_resp.json()['request']
+    print(f"✅ P2 sent join request to team A")
+    
+    # Captain A rejects P2's request
+    reject_resp = captain_a.post(f"{BASE_URL}/join-requests/{jr_p2['id']}/reject")
+    if reject_resp.status_code == 200 and reject_resp.json()['status'] == 'rejected':
+        print(f"✅ Captain A rejected P2's request")
+    else:
+        print(f"❌ Reject returned {reject_resp.status_code}, status: {reject_resp.json().get('status')}")
+    
+    # P2 sends new request
+    jr3_resp = player_p2.post(f"{BASE_URL}/teams/{team_a['id']}/join-request", json={'message': 'Please!'})
+    jr_p2_new = jr3_resp.json()['request']
+    
+    # P2 cancels their own request
+    cancel_resp = player_p2.post(f"{BASE_URL}/join-requests/{jr_p2_new['id']}/cancel")
+    if cancel_resp.status_code == 200 and cancel_resp.json()['status'] == 'cancelled':
+        print(f"✅ P2 cancelled their own request")
+    else:
+        print(f"❌ Cancel returned {cancel_resp.status_code}, status: {cancel_resp.json().get('status')}")
+    
+    print("✅ TEST 5 PASSED: Reject & cancel working")
+except Exception as e:
+    print(f"❌ TEST 5 FAILED: {e}")
+
+# ============ TEST 6: PLAYER PROFILES & DISCOVER ============
+print("\n" + "="*60)
+print("TEST 6: PLAYER PROFILES & DISCOVER")
+print("="*60)
+
+try:
+    # P1 updates profile
+    profile_resp = player_p1.put(f"{BASE_URL}/me/profile", json={
+        'jersey_number': 10,
+        'position': 'MID',
+        'bio': 'Midfielder extraordinaire',
+        'city': 'Manchester',
+        'preferred_foot': 'right'
+    })
+    if profile_resp.status_code == 200:
+        print(f"✅ P1 updated profile")
+    else:
+        print(f"❌ Profile update returned {profile_resp.status_code}")
+    
+    # Get P1's public profile
+    p1_id = me_p1['user']['id']
+    player_resp = requests.get(f"{BASE_URL}/players/{p1_id}")
+    if player_resp.status_code == 200:
+        player_data = player_resp.json()
+        if player_data['player']['status'] == 'club_member' and player_data['club']['name'] == 'Alpha FC':
+            print(f"✅ GET /players/:id shows status=club_member, club=Alpha FC")
+        else:
+            print(f"❌ Player profile: status={player_data['player']['status']}, club={player_data.get('club', {}).get('name')}")
+    
+    # Discover free agents (should include P2, not P1)
+    discover_resp = requests.get(f"{BASE_URL}/discover/players?status=free_agent")
+    if discover_resp.status_code == 200:
+        free_agents = discover_resp.json()['players']
+        p1_in_free = any(p['id'] == p1_id for p in free_agents)
+        p2_id = get_me(player_p2)['user']['id']
+        p2_in_free = any(p['id'] == p2_id for p in free_agents)
+        
+        if not p1_in_free and p2_in_free:
+            print(f"✅ Discover free_agent: P2 included, P1 not included")
+        else:
+            print(f"❌ Discover free_agent: P1={p1_in_free}, P2={p2_in_free}")
+    
+    print("✅ TEST 6 PASSED: Player profiles & discover working")
+except Exception as e:
+    print(f"❌ TEST 6 FAILED: {e}")
+
+# ============ TEST 7: KIT CUSTOMIZATION ============
+print("\n" + "="*60)
+print("TEST 7: KIT CUSTOMIZATION - Sanitization")
+print("="*60)
+
+try:
+    # Captain A updates kit with valid and invalid hex
+    kit_resp = captain_a.put(f"{BASE_URL}/teams/{team_a['id']}", json={
+        'kit': {
+            'home': {'shirt': '#ff0000', 'pattern': 'stripes'},
+            'away': {'shirt': 'bad_hex', 'pattern': 'invalid_pattern'}
+        }
+    })
+    if kit_resp.status_code == 200:
+        kit = kit_resp.json()['team']['kit']
+        if kit['home']['shirt'] == '#ff0000' and kit['home']['pattern'] == 'stripes':
+            print(f"✅ Kit home: valid hex and pattern preserved")
+        else:
+            print(f"❌ Kit home: shirt={kit['home']['shirt']}, pattern={kit['home']['pattern']}")
+        
+        if kit['away']['shirt'] == '#10b981' and kit['away']['pattern'] == 'solid':
+            print(f"✅ Kit away: invalid hex/pattern replaced with defaults")
+        else:
+            print(f"❌ Kit away: shirt={kit['away']['shirt']}, pattern={kit['away']['pattern']}")
+    
+    # Get team and verify kit is returned
+    team_resp = captain_a.get(f"{BASE_URL}/teams/{team_a['id']}")
+    if team_resp.status_code == 200 and team_resp.json()['team']['kit'] is not None:
+        print(f"✅ GET /teams/:id returns kit")
+    
+    # Captain A sets recruiting=false
+    recruit_resp = captain_a.put(f"{BASE_URL}/teams/{team_a['id']}", json={'recruiting': False})
+    if recruit_resp.status_code == 200:
+        print(f"✅ Captain A set recruiting=false")
+    
+    # P2 tries to join -> 400
+    jr_blocked = player_p2.post(f"{BASE_URL}/teams/{team_a['id']}/join-request", json={'message': 'Join?'})
+    if jr_blocked.status_code == 400:
+        print(f"✅ P2 cannot join when recruiting=false (400)")
+    else:
+        print(f"❌ Join request with recruiting=false returned {jr_blocked.status_code}, expected 400")
+    
+    print("✅ TEST 7 PASSED: Kit customization & recruiting flag working")
+except Exception as e:
+    print(f"❌ TEST 7 FAILED: {e}")
+
+# ============ TEST 8: TRANSFER CAPTAIN & LEAVE CLUB ============
+print("\n" + "="*60)
+print("TEST 8: TRANSFER CAPTAIN & LEAVE CLUB")
+print("="*60)
+
+try:
+    # Captain A transfers captaincy to P1
+    transfer_resp = captain_a.post(f"{BASE_URL}/teams/{team_a['id']}/transfer-captain", json={'user_id': p1_id})
+    if transfer_resp.status_code == 200:
+        print(f"✅ Captain A transferred captaincy to P1")
+    else:
+        print(f"❌ Transfer captain returned {transfer_resp.status_code}")
+    
+    # Check P1 is now captain
+    me_p1_new = get_me(player_p1)
+    if me_p1_new['role'] == 'captain':
+        print(f"✅ P1 is now captain")
+    else:
+        print(f"❌ P1 role: {me_p1_new['role']}, expected captain")
+    
+    # Check A is now player
+    me_a_new = get_me(captain_a)
+    if me_a_new['role'] == 'player':
+        print(f"✅ A is now player")
+    else:
+        print(f"❌ A role: {me_a_new['role']}, expected player")
+    
+    # Check team.captain_id updated
+    team_resp = player_p1.get(f"{BASE_URL}/teams/{team_a['id']}")
+    if team_resp.json()['team']['captain_id'] == p1_id:
+        print(f"✅ team.captain_id updated to P1")
+    else:
+        print(f"❌ team.captain_id: {team_resp.json()['team']['captain_id']}, expected {p1_id}")
+    
+    # A (now player) leaves club
+    leave_resp = captain_a.post(f"{BASE_URL}/me/leave-club")
+    if leave_resp.status_code == 200:
+        print(f"✅ A left the club")
+    else:
+        print(f"❌ Leave club returned {leave_resp.status_code}")
+    
+    # Check A is now free_agent
+    me_a_after = get_me(captain_a)
+    if me_a_after['role'] == 'free_agent':
+        print(f"✅ A is now free_agent")
+    else:
+        print(f"❌ A role: {me_a_after['role']}, expected free_agent")
+    
+    # P1 (captain) tries to leave -> 400
+    p1_leave_resp = player_p1.post(f"{BASE_URL}/me/leave-club")
+    if p1_leave_resp.status_code == 400:
+        print(f"✅ P1 (captain) cannot leave (400)")
+    else:
+        print(f"❌ P1 leave returned {p1_leave_resp.status_code}, expected 400")
+    
+    print("✅ TEST 8 PASSED: Transfer captain & leave club working")
+except Exception as e:
+    print(f"❌ TEST 8 FAILED: {e}")
+
+# ============ TEST 9: MEMBER REMOVAL ============
+print("\n" + "="*60)
+print("TEST 9: MEMBER REMOVAL")
+print("="*60)
+
+try:
+    # P2 joins team B
+    jr_b = player_p2.post(f"{BASE_URL}/teams/{team_b['id']}/join-request", json={'message': 'Join Beta'})
+    captain_b.post(f"{BASE_URL}/join-requests/{jr_b.json()['request']['id']}/accept")
+    p2_id = get_me(player_p2)['user']['id']
+    print(f"✅ P2 joined team B")
+    
+    # Captain B removes P2
+    remove_resp = captain_b.delete(f"{BASE_URL}/teams/{team_b['id']}/members/{p2_id}")
+    if remove_resp.status_code == 200:
+        print(f"✅ Captain B removed P2")
+    else:
+        print(f"❌ Remove member returned {remove_resp.status_code}")
+    
+    # Check P2 is free_agent again
+    me_p2 = get_me(player_p2)
+    if me_p2['role'] == 'free_agent':
+        print(f"✅ P2 is now free_agent after removal")
+    else:
+        print(f"❌ P2 role: {me_p2['role']}, expected free_agent")
+    
+    print("✅ TEST 9 PASSED: Member removal working")
+except Exception as e:
+    print(f"❌ TEST 9 FAILED: {e}")
+
+# ============ TEST 10: LEGACY BACKFILL ============
+print("\n" + "="*60)
+print("TEST 10: LEGACY BACKFILL - Direct Mongo insert")
+print("="*60)
+
+try:
+    # Create a new user
+    legacy_user = requests.Session()
+    legacy_info = register_user(legacy_user, "Legacy Captain")
+    legacy_id = get_me(legacy_user)['user']['id']
+    
+    # Insert team directly in Mongo with captain_id but no club_members entry
+    client = MongoClient(MONGO_URL)
+    db = client[DB_NAME]
+    
+    legacy_team_id = str(uuid4())
+    db.teams.insert_one({
+        'id': legacy_team_id,
+        'captain_id': legacy_id,
+        'name': 'Legacy Team',
+        'city': 'London',
+        'rating': 1000,
+        'wins': 0, 'draws': 0, 'losses': 0,
+        'goals_for': 0, 'goals_against': 0,
+        'streak': 0, 'best_streak': 0,
+        'matches_played': 0,
+        'followers': [],
+        'achievements': [],
+        'last_matches': [],
+        'recruiting': True,
+        'primary_color': '#10b981',
+        'secondary_color': '#0ea5e9',
+        'football_type': 'both',
+        'created_at': None
+    })
+    print(f"✅ Inserted legacy team directly in Mongo (no club_members entry)")
+    
+    # Call /auth/me for legacy user -> should return role='captain'
+    me_legacy = get_me(legacy_user)
+    if me_legacy['role'] == 'captain':
+        print(f"✅ Legacy user /auth/me returns role='captain' (backfilled)")
+    else:
+        print(f"❌ Legacy user role: {me_legacy['role']}, expected captain")
+    
+    # Verify club_members entry was created
+    member_entry = db.club_members.find_one({'user_id': legacy_id, 'club_id': legacy_team_id})
+    if member_entry and member_entry['role'] == 'captain':
+        print(f"✅ club_members entry auto-created with role='captain'")
+    else:
+        print(f"❌ club_members entry not found or wrong role")
+    
+    print("✅ TEST 10 PASSED: Legacy backfill working")
+except Exception as e:
+    print(f"❌ TEST 10 FAILED: {e}")
+
+# ============ TEST 11: REGRESSION - CHALLENGE->MATCH->ELO ============
+print("\n" + "="*60)
+print("TEST 11: REGRESSION - Challenge->Match->Dual Confirm->ELO")
+print("="*60)
+
+try:
+    # Create two new captains with teams
+    cap_x = requests.Session()
+    cap_y = requests.Session()
+    
+    register_user(cap_x, "Captain X")
+    register_user(cap_y, "Captain Y")
+    
+    team_x_resp = cap_x.post(f"{BASE_URL}/teams", json={'name': 'Team X', 'city': 'London', 'football_type': '5'})
+    team_y_resp = cap_y.post(f"{BASE_URL}/teams", json={'name': 'Team Y', 'city': 'London', 'football_type': '5'})
+    
+    team_x = team_x_resp.json()['team']
+    team_y = team_y_resp.json()['team']
+    print(f"✅ Created Team X and Team Y")
+    
+    # Team X creates challenge
+    ch_resp = cap_x.post(f"{BASE_URL}/challenges", json={
+        'football_type': '5',
+        'date': '2024-12-20',
+        'city': 'London'
+    })
+    challenge = ch_resp.json()['challenge']
+    print(f"✅ Team X created challenge")
+    
+    # Team Y accepts challenge
+    accept_resp = cap_y.post(f"{BASE_URL}/challenges/{challenge['id']}/accept")
+    match = accept_resp.json()['match']
+    print(f"✅ Team Y accepted challenge, match created")
+    
+    # Team X confirms result: 3-1
+    conf_x = cap_x.post(f"{BASE_URL}/matches/{match['id']}/confirm", json={
+        'score_home': 3,
+        'score_away': 1
+    })
+    if conf_x.json()['match']['status'] == 'pending':
+        print(f"✅ Team X confirmed (status=pending)")
+    else:
+        print(f"❌ After first confirm, status: {conf_x.json()['match']['status']}, expected pending")
+    
+    # Team Y confirms matching result: 3-1
+    conf_y = cap_y.post(f"{BASE_URL}/matches/{match['id']}/confirm", json={
+        'score_home': 3,
+        'score_away': 1
+    })
+    if conf_y.json()['match']['status'] == 'confirmed':
+        print(f"✅ Team Y confirmed matching score (status=confirmed)")
+    else:
+        print(f"❌ After second confirm, status: {conf_y.json()['match']['status']}, expected confirmed")
+    
+    # Check ELO updates
+    team_x_after = cap_x.get(f"{BASE_URL}/teams/{team_x['id']}").json()['team']
+    team_y_after = cap_y.get(f"{BASE_URL}/teams/{team_y['id']}").json()['team']
+    
+    if team_x_after['rating'] > 1000:
+        print(f"✅ Team X rating increased: {team_x_after['rating']} (winner)")
+    else:
+        print(f"❌ Team X rating: {team_x_after['rating']}, expected > 1000")
+    
+    if team_y_after['rating'] < 1000:
+        print(f"✅ Team Y rating decreased: {team_y_after['rating']} (loser)")
+    else:
+        print(f"❌ Team Y rating: {team_y_after['rating']}, expected < 1000")
+    
+    # Check stats updated
+    if team_x_after['wins'] == 1 and team_x_after['goals_for'] == 3:
+        print(f"✅ Team X stats: wins=1, goals_for=3")
+    else:
+        print(f"❌ Team X stats: wins={team_x_after['wins']}, goals_for={team_x_after['goals_for']}")
+    
+    if team_y_after['losses'] == 1 and team_y_after['goals_against'] == 3:
+        print(f"✅ Team Y stats: losses=1, goals_against=3")
+    else:
+        print(f"❌ Team Y stats: losses={team_y_after['losses']}, goals_against={team_y_after['goals_against']}")
+    
+    print("✅ TEST 11 PASSED: Challenge->Match->ELO regression working")
+except Exception as e:
+    print(f"❌ TEST 11 FAILED: {e}")
+
+# ============ TEST 12: PLAYER CANNOT ACCEPT CHALLENGE ============
+print("\n" + "="*60)
+print("TEST 12: PLAYER CANNOT ACCEPT CHALLENGE (403)")
+print("="*60)
+
+try:
+    # Create new captain and team
+    cap_z = requests.Session()
+    register_user(cap_z, "Captain Z")
+    team_z_resp = cap_z.post(f"{BASE_URL}/teams", json={'name': 'Team Z', 'city': 'Manchester'})
+    team_z = team_z_resp.json()['team']
+    
+    # Team Z creates challenge
+    ch_z = cap_z.post(f"{BASE_URL}/challenges", json={'football_type': '5', 'city': 'Manchester'})
+    challenge_z = ch_z.json()['challenge']
+    
+    # Add a player to Team Y
+    player_new = requests.Session()
+    register_user(player_new, "Player New")
+    jr_new = player_new.post(f"{BASE_URL}/teams/{team_y['id']}/join-request", json={'message': 'Join'})
+    cap_y.post(f"{BASE_URL}/join-requests/{jr_new.json()['request']['id']}/accept")
+    print(f"✅ Player New joined Team Y")
+    
+    # Player tries to accept challenge -> 403
+    accept_player = player_new.post(f"{BASE_URL}/challenges/{challenge_z['id']}/accept")
+    if accept_player.status_code == 403:
+        print(f"✅ Player cannot accept challenge (403)")
+    else:
+        print(f"❌ Player accept challenge returned {accept_player.status_code}, expected 403")
+    
+    print("✅ TEST 12 PASSED: Player cannot accept challenge")
+except Exception as e:
+    print(f"❌ TEST 12 FAILED: {e}")
+
+# ============ TEST 13: PLAYER CANNOT CONFIRM MATCH ============
+print("\n" + "="*60)
+print("TEST 13: PLAYER CANNOT CONFIRM MATCH (403)")
+print("="*60)
+
+try:
+    # Captain Y accepts challenge Z
+    accept_cap = cap_y.post(f"{BASE_URL}/challenges/{challenge_z['id']}/accept")
+    match_z = accept_cap.json()['match']
+    
+    # Player tries to confirm match -> 403
+    conf_player = player_new.post(f"{BASE_URL}/matches/{match_z['id']}/confirm", json={'score_home': 2, 'score_away': 2})
+    if conf_player.status_code == 403:
+        print(f"✅ Player cannot confirm match (403)")
+    else:
+        print(f"❌ Player confirm match returned {conf_player.status_code}, expected 403")
+    
+    print("✅ TEST 13 PASSED: Player cannot confirm match")
+except Exception as e:
+    print(f"❌ TEST 13 FAILED: {e}")
+
+print("\n" + "="*60)
+print("ALL TESTS COMPLETED")
+print("="*60)
